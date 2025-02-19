@@ -8,6 +8,7 @@ import { useState, useCallback } from "react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { signout } from "./login/actions"
+import { createClient } from '@/utils/supabase/client';
 
 type CartItem = {
   id: string
@@ -22,6 +23,7 @@ export default function Page() {
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isGeneratingCode, setIsGeneratingCode] = useState(false)
   const [sessionCode, setSessionCode] = useState<string | null>(null)
+  const supabase = createClient();
 
   const addToCart = (item: Omit<CartItem, "quantity">) => {
     setCartItems((prevItems) => {
@@ -48,15 +50,62 @@ export default function Page() {
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0)
   const totalPrice = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
-  const generateSessionCode = useCallback(() => {
-    setIsGeneratingCode(true)
-    setTimeout(() => {
-      const code = Math.floor(100000 + Math.random() * 900000).toString()
-      setSessionCode(code)
-      setIsGeneratingCode(false)
-    }, 1500) // Simulating API call delay
-  }, [])
+  // Helper function to generate a random 6-character session code
+  const generateRandomCode = (length = 6) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    let code = ''
+    for (let i = 0; i < length; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return code
+  }
 
+  // Generate session code by creating a session and adding the current user to it
+  const generateSessionCode = useCallback(async () => {
+    setIsGeneratingCode(true)
+
+    // 1. Get the current authenticated user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      console.error("User not logged in")
+      setIsGeneratingCode(false)
+      return
+    }
+    const userId = user.id
+
+    // 2. Generate a unique session code
+    const code = generateRandomCode()
+
+    // 3. Insert the session into the 'sessions' table
+    const { data: sessionData, error: sessionError } = await supabase
+      .from('sessions')
+      .insert([{ code, created_by: userId }])
+      .select()
+      .single()
+
+    if (sessionError) {
+      console.error("Error creating session:", sessionError)
+      setIsGeneratingCode(false)
+      return
+    }
+
+    // 4. Add the current user to the 'session_users' table
+    const { error: joinError } = await supabase
+      .from('session_users')
+      .insert([{ session_id: sessionData.id, user_id: userId }])
+
+    if (joinError) {
+      console.error("Error adding user to session:", joinError)
+      setIsGeneratingCode(false)
+      return
+    }
+
+    // 5. Set the session code in state so it can be displayed
+    setSessionCode(sessionData.code)
+    setIsGeneratingCode(false)
+  }, [supabase])
+
+  // Copy session code to clipboard
   const copyToClipboard = useCallback(() => {
     if (sessionCode) {
       navigator.clipboard.writeText(sessionCode)
@@ -82,14 +131,17 @@ export default function Page() {
             </Link>
           </nav>
           <div className="flex items-center gap-2">
-            {!sessionCode && <Button
-              onClick={generateSessionCode}
-              disabled={isGeneratingCode}
-              className="rounded-full px-4 h-12 bg-black text-white hover:bg-black/90"
-            >
-              {isGeneratingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Create Live Session
-            </Button>}
+            {/* Create Session Button / Display Session Code */}
+            {!sessionCode && (
+              <Button
+                onClick={generateSessionCode}
+                disabled={isGeneratingCode}
+                className="rounded-full px-4 h-12 bg-black text-white hover:bg-black/90"
+              >
+                {isGeneratingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Create Live Session
+              </Button>
+            )}
             {sessionCode && (
               <div className="flex items-center bg-gray-100 rounded-full h-12 px-4 border border-gray-700">
                 <input
@@ -442,4 +494,3 @@ export default function Page() {
     </div>
   )
 }
-
