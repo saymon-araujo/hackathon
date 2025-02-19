@@ -1,12 +1,34 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { ChevronRight, ShoppingBag, User, LogOut, Plus, Minus, X, Copy, Loader2 } from "lucide-react"
+import {
+  ChevronRight,
+  ShoppingBag,
+  User,
+  LogOut,
+  Plus,
+  Minus,
+  X,
+  Copy,
+  Loader2,
+} from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
 import { useState, useCallback, useEffect } from "react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { signout } from "./login/actions"
 import { createClient } from "@/utils/supabase/client"
 import {
@@ -20,11 +42,21 @@ import {
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
+// -----------------------------------------------------------------------------
+// Type definitions
+// -----------------------------------------------------------------------------
+
+// Updated CartItem type to use "item_id" consistently (as returned by Supabase)
 type CartItem = {
-  id: string
+  item_id: string
   name: string
   price: number
   quantity: number
@@ -47,115 +79,145 @@ type Participant = {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Helper functions (outside the component to avoid re-creation)
+// -----------------------------------------------------------------------------
+
+/** Generates a random alphanumeric code of given length */
+const generateRandomCode = (length = 6): string => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  let code = ""
+  for (let i = 0; i < length; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return code
+}
+
+/** Returns the current authenticated user */
+const getUser = async (supabase: ReturnType<typeof createClient>) => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  return user
+}
+
+// -----------------------------------------------------------------------------
+// Reusable component for rendering a cart item row
+// -----------------------------------------------------------------------------
+
+type CartItemRowProps = {
+  item: CartItem
+  onUpdate: (itemId: string, delta: number) => void
+  onRemove: (itemId: string) => void
+}
+
+function CartItemRow({ item, onUpdate, onRemove }: CartItemRowProps) {
+  return (
+    <div key={item.item_id} className="flex items-center space-x-4">
+      <Image
+        src={item.image || "/placeholder.svg"}
+        alt={item.name}
+        width={60}
+        height={60}
+        className="rounded-md"
+      />
+      <div className="flex-1">
+        <h3 className="text-sm font-medium">{item.name}</h3>
+        <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
+        <div className="flex items-center space-x-2 mt-1">
+          <Button
+            size="icon"
+            variant="outline"
+            className="h-6 w-6"
+            onClick={() => onUpdate(item.item_id, -1)}
+          >
+            <Minus className="h-3 w-3" />
+          </Button>
+          <span className="text-sm">{item.quantity}</span>
+          <Button
+            size="icon"
+            variant="outline"
+            className="h-6 w-6"
+            onClick={() => onUpdate(item.item_id, 1)}
+          >
+            <Plus className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
+      <Button size="icon" variant="ghost" onClick={() => onRemove(item.item_id)}>
+        <X className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+}
+
+// -----------------------------------------------------------------------------
+// Main component
+// -----------------------------------------------------------------------------
+
 export default function Page() {
   // -------------------------------
   // Local State
   // -------------------------------
-  const [cartItems, setCartItems] = useState<CartItem[]>([])
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isGeneratingCode, setIsGeneratingCode] = useState(false)
   const [sessionCode, setSessionCode] = useState<string | null>(null)
-  // sessionData holds the active session (created or joined)
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
-  // sessionUsers holds the list of participants (with profiles.email)
   const [sessionUsers, setSessionUsers] = useState<Participant[]>([])
   const supabase = createClient()
   const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false)
   const [joinSessionCode, setJoinSessionCode] = useState("")
-  // New: Participants dialog to view participant emails
   const [isParticipantsDialogOpen, setIsParticipantsDialogOpen] = useState(false)
   const [sessionCartItems, setSessionCartItems] = useState<CartItem[]>([])
   const [personalCartItems, setPersonalCartItems] = useState<CartItem[]>([])
 
-
-  console.log("sessionCartItems", sessionCartItems)
-
-  // -------------------------------
-  // Cart helper functions
-  // -------------------------------
-  const addToCart = (item: Omit<CartItem, "quantity">) => {
-    setCartItems((prevItems) => {
-      const existingItem = prevItems.find((i) => i.id === item.id)
-      if (existingItem) {
-        return prevItems.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i))
-      }
-      return [...prevItems, { ...item, quantity: 1 }]
-    })
-  }
-
-  const removeFromCart = (id: string) => {
-    setCartItems((prevItems) => prevItems.filter((item) => item.id !== id))
-  }
-
-  const updateQuantity = (id: string, delta: number) => {
-    setCartItems((prevItems) =>
-      prevItems
-        .map((item) => (item.id === id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item))
-        .filter((item) => item.quantity > 0),
-    )
-  }
-
-  const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0)
-  const totalPrice = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
-
   // -------------------------------
   // Session Creation Logic
   // -------------------------------
-  // Helper function to generate a random 6-character session code
-  const generateRandomCode = (length = 6) => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    let code = ""
-    for (let i = 0; i < length; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length))
-    }
-    return code
-  }
-
-  // Create a new session by generating a code and adding the current user to it.
   const generateSessionCode = useCallback(async () => {
-    // Block if user is already in a session
     if (sessionData) {
       toast.error("You are already in a session")
       return
     }
     setIsGeneratingCode(true)
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser(supabase)
     if (!user) {
       toast.error("User not logged in")
       setIsGeneratingCode(false)
       return
     }
-    const userId = user.id
 
-    // Check if the user already created (or joined) a session.
-    const { data: existingSession } = await supabase.from("sessions").select("*").eq("created_by", userId).single()
+    // Check if the user already created a session.
+    const { data: existingSession } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("created_by", user.id)
+      .single()
 
     if (existingSession) {
       setSessionCode(existingSession.code)
-      console.log("existingSession", existingSession)
       setSessionData(existingSession)
       setIsGeneratingCode(false)
       return
     }
 
     const code = generateRandomCode()
-
     const { data: newSession, error: sessionError } = await supabase
       .from("sessions")
-      .insert([{ code, created_by: userId }])
+      .insert([{ code, created_by: user.id }])
       .select()
       .single()
+
     if (sessionError) {
       toast.error("Error creating session")
       setIsGeneratingCode(false)
       return
     }
 
+    // Add current user to the session_users table.
     const { error: joinError } = await supabase
       .from("session_users")
-      .insert([{ session_id: newSession.id, user_id: userId }])
+      .insert([{ session_id: newSession.id, user_id: user.id }])
     if (joinError) {
       toast.error("Error adding you to session")
       setIsGeneratingCode(false)
@@ -167,21 +229,20 @@ export default function Page() {
     setIsGeneratingCode(false)
   }, [supabase, sessionData])
 
-  // On mount, check if the current user already created or joined a session.
+  // On mount, check if the current user already has an active session.
   useEffect(() => {
     const checkActiveSession = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await getUser(supabase)
       if (!user) return
 
-      console.log("user", user)
-
-      // Check for session created by the user.
-      const { data: activeSession } = await supabase.from("sessions").select("*").eq("created_by", user.id).single()
+      // Check for a session created by the user.
+      const { data: activeSession } = await supabase
+        .from("sessions")
+        .select("*")
+        .eq("created_by", user.id)
+        .single()
       if (activeSession) {
         setSessionCode(activeSession.code)
-        console.log("activeSession", activeSession)
         setSessionData(activeSession)
       } else {
         // Optionally, check if the user has joined any session.
@@ -206,18 +267,14 @@ export default function Page() {
   // -------------------------------
   // Join Session Logic
   // -------------------------------
-  // Called when a user enters a session code and clicks "Join"
   const joinSession = async () => {
-    // Block if user is already in a session
     if (sessionData) {
       toast.error("You are already in a session")
       return
     }
     if (!joinSessionCode) return
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser(supabase)
     if (!user) {
       toast.error("User not logged in")
       return
@@ -260,7 +317,6 @@ export default function Page() {
     }
 
     toast.success("Successfully joined session")
-
     setSessionData(foundSession)
     setSessionCode(foundSession.code)
     setIsJoinDialogOpen(false)
@@ -268,12 +324,11 @@ export default function Page() {
   }
 
   // -------------------------------
-  // Realtime subscription for session participants
+  // Realtime subscription: Session Participants
   // -------------------------------
   useEffect(() => {
     if (!sessionData) return
 
-    // Helper to fetch session users (with profiles.email)
     const fetchSessionUsers = async () => {
       const { data, error } = await supabase
         .from("session_users")
@@ -298,27 +353,18 @@ export default function Page() {
           filter: `session_id=eq.${sessionData.id}`,
         },
         async (payload) => {
-          console.log("Received realtime payload:", payload);
-
           await fetchSessionUsers()
           if (payload.eventType === "INSERT") {
             toast.success("A user joined the session")
           }
           if (payload.eventType === "DELETE") {
-            // Get the current authenticated user info
-            const {
-              data: { user },
-            } = await supabase.auth.getUser()
-            // If the deleted row belongs to the session creator…
+            const user = await getUser(supabase)
             if (payload.old.user_id === sessionData.created_by) {
               setSessionData(null)
               setSessionCode(null)
               setSessionUsers([])
               toast("Session creator disconnected. All users have been disconnected.")
-            }
-            // Otherwise, if the current user is the session creator,
-            // notify them of who disconnected
-            else if (sessionData.created_by === user.id) {
+            } else if (sessionData.created_by === user?.id) {
               const { data: profileData } = await supabase
                 .from("profiles")
                 .select("email")
@@ -336,7 +382,6 @@ export default function Page() {
       .subscribe()
 
     return () => {
-      console.log("Unsubscribing from channel");
       subscription.unsubscribe()
     }
   }, [supabase, sessionData])
@@ -351,19 +396,17 @@ export default function Page() {
     }
   }, [sessionCode])
 
-  // Updated disconnect function
+  // -------------------------------
+  // Disconnect Logic
+  // -------------------------------
   const disconnectFromSession = useCallback(async () => {
     if (!sessionData) return
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser(supabase)
     if (!user) return
 
-    // Check if the current user is the session creator
     if (sessionData.created_by === user.id) {
-      // Option 1: Delete related rows manually
-      // Delete session cart items
+      // If session creator disconnects, delete all related session data.
       const { error: cartError } = await supabase
         .from("session_cart_items")
         .delete()
@@ -372,8 +415,6 @@ export default function Page() {
         toast.error("Error deleting session cart items")
         return
       }
-
-      // Delete all session_users for the session
       const { error: usersError } = await supabase
         .from("session_users")
         .delete()
@@ -385,19 +426,17 @@ export default function Page() {
       const { error: sessionDeleteError } = await supabase
         .from("sessions")
         .delete()
-        .match({ id: sessionData.id });
+        .match({ id: sessionData.id })
       if (sessionDeleteError) {
-        toast.error("Error deleting session");
-        return;
+        toast.error("Error deleting session")
+        return
       }
-
-
       setSessionData(null)
       setSessionCode(null)
       setSessionUsers([])
       toast("Session creator disconnected. All users have been disconnected.")
     } else {
-      // A participant is disconnecting: remove only their row
+      // A participant disconnects: remove only their row.
       const { error } = await supabase
         .from("session_users")
         .delete()
@@ -411,17 +450,21 @@ export default function Page() {
     }
   }, [supabase, sessionData])
 
-
+  // -------------------------------
+  // Session Cart Subscription
+  // -------------------------------
   useEffect(() => {
     if (!sessionData) return
 
     const fetchSessionCartItems = async () => {
-      const { data, error } = await supabase.from("session_cart_items").select("*").eq("session_id", sessionData.id)
+      const { data, error } = await supabase
+        .from("session_cart_items")
+        .select("*")
+        .eq("session_id", sessionData.id)
       if (!error && data) {
         setSessionCartItems(data)
       }
     }
-
     fetchSessionCartItems()
 
     const sessionCartSubscription = supabase
@@ -447,18 +490,21 @@ export default function Page() {
     }
   }, [supabase, sessionData])
 
+  // -------------------------------
+  // Personal Cart Subscription
+  // -------------------------------
   useEffect(() => {
     const fetchPersonalCartItems = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await getUser(supabase)
       if (!user) return
-      const { data, error } = await supabase.from("personal_cart_items").select("*").eq("user_id", user.id)
+      const { data, error } = await supabase
+        .from("personal_cart_items")
+        .select("*")
+        .eq("user_id", user.id)
       if (!error && data) {
         setPersonalCartItems(data)
       }
     }
-
     fetchPersonalCartItems()
 
     const personalCartSubscription = supabase
@@ -471,7 +517,6 @@ export default function Page() {
           event: "*",
           schema: "public",
           table: "personal_cart_items",
-          // Optionally filter by user id if needed
         },
         async () => {
           await fetchPersonalCartItems()
@@ -484,17 +529,19 @@ export default function Page() {
     }
   }, [supabase])
 
+  // -------------------------------
+  // Cart Update Functions
+  // -------------------------------
   const addToSessionCart = async (item: Omit<CartItem, "quantity">) => {
     if (!sessionData) {
       toast.error("No active session")
       return
     }
-    // Upsert: if an item exists for this session, increment its quantity
     const { error } = await supabase.from("session_cart_items").upsert(
       [
         {
           session_id: sessionData.id,
-          item_id: item.id,
+          item_id: item.item_id,
           name: item.name,
           price: item.price,
           image: item.image,
@@ -503,26 +550,22 @@ export default function Page() {
       ],
       { onConflict: "session_id,item_id" },
     )
-
     if (error) {
       toast.error("Error adding item to shared cart")
     }
   }
 
   const addToPersonalCart = async (item: Omit<CartItem, "quantity">) => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser(supabase)
     if (!user) {
       toast.error("User not logged in")
       return
     }
-    // Upsert into the personal cart table for this user
     const { error } = await supabase.from("personal_cart_items").upsert(
       [
         {
           user_id: user.id,
-          item_id: item.id,
+          item_id: item.item_id,
           name: item.name,
           price: item.price,
           image: item.image,
@@ -537,9 +580,7 @@ export default function Page() {
   }
 
   const updatePersonalCartQuantity = async (itemId: string, delta: number) => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser(supabase)
     if (!user) return
 
     const { data, error } = await supabase
@@ -548,14 +589,11 @@ export default function Page() {
       .eq("user_id", user.id)
       .eq("item_id", itemId)
       .single()
-
     if (error) {
       toast.error("Error updating item quantity")
       return
     }
-
     const newQuantity = Math.max(0, (data?.quantity || 0) + delta)
-
     if (newQuantity === 0) {
       await removeFromPersonalCart(itemId)
     } else {
@@ -564,7 +602,6 @@ export default function Page() {
         .update({ quantity: newQuantity })
         .eq("user_id", user.id)
         .eq("item_id", itemId)
-
       if (updateError) {
         toast.error("Error updating item quantity")
       }
@@ -572,13 +609,14 @@ export default function Page() {
   }
 
   const removeFromPersonalCart = async (itemId: string) => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser(supabase)
     if (!user) return
 
-    const { error } = await supabase.from("personal_cart_items").delete().eq("user_id", user.id).eq("item_id", itemId)
-
+    const { error } = await supabase
+      .from("personal_cart_items")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("item_id", itemId)
     if (error) {
       toast.error("Error removing item from cart")
     }
@@ -593,14 +631,11 @@ export default function Page() {
       .eq("session_id", sessionData.id)
       .eq("item_id", itemId)
       .single()
-
     if (error) {
       toast.error("Error updating item quantity")
       return
     }
-
     const newQuantity = Math.max(0, (data?.quantity || 0) + delta)
-
     if (newQuantity === 0) {
       await removeFromSessionCart(itemId)
     } else {
@@ -609,7 +644,6 @@ export default function Page() {
         .update({ quantity: newQuantity })
         .eq("session_id", sessionData.id)
         .eq("item_id", itemId)
-
       if (updateError) {
         toast.error("Error updating item quantity")
       }
@@ -618,20 +652,25 @@ export default function Page() {
 
   const removeFromSessionCart = async (itemId: string) => {
     if (!sessionData) return
-
     const { error } = await supabase
       .from("session_cart_items")
       .delete()
       .eq("session_id", sessionData.id)
       .eq("item_id", itemId)
-
     if (error) {
       toast.error("Error removing item from session cart")
     }
   }
 
+  // -------------------------------
+  // Render
+  // -------------------------------
+  // Calculate total badge count
+  const totalCartCount = personalCartItems.length + sessionCartItems.length
+
   return (
     <div className="flex flex-col min-h-screen bg-white">
+      {/* HEADER */}
       <header className="fixed w-full z-50 bg-white/80 backdrop-blur-md">
         <div className="container flex h-20 items-center justify-between px-4">
           <Link href="#" className="text-3xl font-bold tracking-tighter">
@@ -649,7 +688,7 @@ export default function Page() {
             </Link>
           </nav>
           <div className="flex items-center gap-2">
-            {/* If a session is active, display the session code with participant avatars and a button to view details */}
+            {/* Session Info */}
             {sessionCode && (
               <div className="flex items-center space-x-2">
                 <div className="flex items-center bg-gray-100 rounded-full px-4 border border-gray-700">
@@ -670,7 +709,9 @@ export default function Page() {
                         <Tooltip key={participant.id}>
                           <TooltipTrigger asChild>
                             <Avatar className="w-8 h-8 border-2 border-white">
-                              <AvatarFallback>{participant.profiles?.email?.[0].toUpperCase() || "?"}</AvatarFallback>
+                              <AvatarFallback>
+                                {participant.profiles?.email?.[0].toUpperCase() || "?"}
+                              </AvatarFallback>
                             </Avatar>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -694,7 +735,7 @@ export default function Page() {
                 </div>
               </div>
             )}
-            {/* Block join and create if already in a session */}
+            {/* Session creation/join buttons */}
             {!sessionCode && (
               <>
                 <Button
@@ -702,7 +743,9 @@ export default function Page() {
                   disabled={isGeneratingCode}
                   className="rounded-full px-4 h-12 bg-black text-white hover:bg-black/90"
                 >
-                  {isGeneratingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  {isGeneratingCode ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : null}
                   Create Live Session
                 </Button>
                 <Dialog open={isJoinDialogOpen} onOpenChange={setIsJoinDialogOpen}>
@@ -714,7 +757,9 @@ export default function Page() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Join Live Session</DialogTitle>
-                      <DialogDescription>Enter the 6-digit code to join an existing session.</DialogDescription>
+                      <DialogDescription>
+                        Enter the 6-digit code to join an existing session.
+                      </DialogDescription>
                     </DialogHeader>
                     <div className="flex items-center space-x-2">
                       <Input
@@ -744,7 +789,9 @@ export default function Page() {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Avatar className="w-10 h-10">
-                              <AvatarFallback>{participant.profiles?.email?.[0].toUpperCase() || "?"}</AvatarFallback>
+                              <AvatarFallback>
+                                {participant.profiles?.email?.[0].toUpperCase() || "?"}
+                              </AvatarFallback>
                             </Avatar>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -765,9 +812,9 @@ export default function Page() {
               <SheetTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12 relative">
                   <ShoppingBag className="h-5 w-5" />
-                  {(personalCartItems.length > 0 || sessionCartItems.length > 0) && (
+                  {totalCartCount > 0 && (
                     <span className="absolute top-0 right-0 bg-rose-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                      {personalCartItems.length + sessionCartItems.length}
+                      {totalCartCount}
                     </span>
                   )}
                 </Button>
@@ -785,44 +832,17 @@ export default function Page() {
                   <TabsContent value="personal" className="mt-4">
                     <div className="space-y-4">
                       {personalCartItems.length === 0 ? (
-                        <p className="text-center text-gray-500">Your personal cart is empty</p>
+                        <p className="text-center text-gray-500">
+                          Your personal cart is empty
+                        </p>
                       ) : (
                         personalCartItems.map((item) => (
-                          <div key={item.item_id} className="flex items-center space-x-4">
-                            <Image
-                              src={item.image || "/placeholder.svg"}
-                              alt={item.name}
-                              width={60}
-                              height={60}
-                              className="rounded-md"
-                            />
-                            <div className="flex-1">
-                              <h3 className="text-sm font-medium">{item.name}</h3>
-                              <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
-                              <div className="flex items-center space-x-2 mt-1">
-                                <Button
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-6 w-6"
-                                  onClick={() => updatePersonalCartQuantity(item.item_id, -1)}
-                                >
-                                  <Minus className="h-3 w-3" />
-                                </Button>
-                                <span className="text-sm">{item.quantity}</span>
-                                <Button
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-6 w-6"
-                                  onClick={() => updatePersonalCartQuantity(item.item_id, 1)}
-                                >
-                                  <Plus className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
-                            <Button size="icon" variant="ghost" onClick={() => removeFromPersonalCart(item.item_id)}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          <CartItemRow
+                            key={item.item_id}
+                            item={item}
+                            onUpdate={updatePersonalCartQuantity}
+                            onRemove={removeFromPersonalCart}
+                          />
                         ))
                       )}
                     </div>
@@ -831,7 +851,10 @@ export default function Page() {
                         <div className="flex justify-between text-sm font-medium">
                           <span>Total</span>
                           <span>
-                            ${personalCartItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
+                            $
+                            {personalCartItems
+                              .reduce((sum, item) => sum + item.price * item.quantity, 0)
+                              .toFixed(2)}
                           </span>
                         </div>
                         <Button className="w-full">Checkout Personal Cart</Button>
@@ -844,41 +867,12 @@ export default function Page() {
                         <p className="text-center text-gray-500">The session cart is empty</p>
                       ) : (
                         sessionCartItems.map((item) => (
-                          <div key={item.item_id} className="flex items-center space-x-4">
-                            <Image
-                              src={item.image || "/placeholder.svg"}
-                              alt={item.name}
-                              width={60}
-                              height={60}
-                              className="rounded-md"
-                            />
-                            <div className="flex-1">
-                              <h3 className="text-sm font-medium">{item.name}</h3>
-                              <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
-                              <div className="flex items-center space-x-2 mt-1">
-                                <Button
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-6 w-6"
-                                  onClick={() => updateSessionCartQuantity(item.item_id, -1)}
-                                >
-                                  <Minus className="h-3 w-3" />
-                                </Button>
-                                <span className="text-sm">{item.quantity}</span>
-                                <Button
-                                  size="icon"
-                                  variant="outline"
-                                  className="h-6 w-6"
-                                  onClick={() => updateSessionCartQuantity(item.item_id, 1)}
-                                >
-                                  <Plus className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
-                            <Button size="icon" variant="ghost" onClick={() => removeFromSessionCart(item.item_id)}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          <CartItemRow
+                            key={item.item_id}
+                            item={item}
+                            onUpdate={updateSessionCartQuantity}
+                            onRemove={removeFromSessionCart}
+                          />
                         ))
                       )}
                     </div>
@@ -887,7 +881,10 @@ export default function Page() {
                         <div className="flex justify-between text-sm font-medium">
                           <span>Total</span>
                           <span>
-                            ${sessionCartItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
+                            $
+                            {sessionCartItems
+                              .reduce((sum, item) => sum + item.price * item.quantity, 0)
+                              .toFixed(2)}
                           </span>
                         </div>
                         <Button className="w-full">Checkout Session Cart</Button>
@@ -922,8 +919,10 @@ export default function Page() {
           </div>
         </div>
       </header>
+
+      {/* MAIN CONTENT */}
       <main className="flex-1">
-        {/* Main banner */}
+        {/* Main Banner */}
         <section className="relative min-h-screen flex items-center pt-20">
           <div className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
             <div className="relative h-full">
@@ -967,7 +966,7 @@ export default function Page() {
           </div>
         </section>
 
-        {/* Featured pieces */}
+        {/* Featured Pieces */}
         <section className="py-24 md:py-32 bg-gray-50">
           <div className="container px-4">
             <div className="flex flex-col md:flex-row justify-between items-start mb-16">
@@ -981,6 +980,7 @@ export default function Page() {
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {/* Featured Item 1 */}
               <div className="group relative aspect-[3/4] overflow-hidden rounded-lg">
                 <Image
                   src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg"
@@ -991,7 +991,9 @@ export default function Page() {
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
                   <h3 className="text-2xl font-bold text-white mb-2">Casual Luxe</h3>
-                  <p className="text-white/80 mb-4">Effortless elegance for the modern sophisticate</p>
+                  <p className="text-white/80 mb-4">
+                    Effortless elegance for the modern sophisticate
+                  </p>
                   <div className="flex space-x-2">
                     <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
                       Shop Now
@@ -999,10 +1001,11 @@ export default function Page() {
                     <Button
                       onClick={() =>
                         addToSessionCart({
-                          id: "casual-luxe",
+                          item_id: "casual-luxe",
                           name: "Casual Luxe",
                           price: 299,
-                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
                         })
                       }
                       className="bg-white text-black hover:bg-white/90"
@@ -1012,10 +1015,11 @@ export default function Page() {
                     <Button
                       onClick={() =>
                         addToPersonalCart({
-                          id: "casual-luxe",
+                          item_id: "casual-luxe",
                           name: "Casual Luxe",
                           price: 299,
-                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
                         })
                       }
                       className="bg-black text-white hover:bg-black/90"
@@ -1025,6 +1029,7 @@ export default function Page() {
                   </div>
                 </div>
               </div>
+              {/* Featured Item 2 */}
               <div className="group relative aspect-[3/4] overflow-hidden rounded-lg">
                 <Image
                   src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg"
@@ -1043,10 +1048,11 @@ export default function Page() {
                     <Button
                       onClick={() =>
                         addToSessionCart({
-                          id: "evening-drama",
+                          item_id: "evening-drama",
                           name: "Evening Drama",
                           price: 499,
-                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
                         })
                       }
                       className="bg-white text-black hover:bg-white/90"
@@ -1056,10 +1062,11 @@ export default function Page() {
                     <Button
                       onClick={() =>
                         addToPersonalCart({
-                          id: "evening-drama",
+                          item_id: "evening-drama",
                           name: "Evening Drama",
                           price: 499,
-                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
                         })
                       }
                       className="bg-black text-white hover:bg-black/90"
@@ -1069,6 +1076,7 @@ export default function Page() {
                   </div>
                 </div>
               </div>
+              {/* Featured Item 3 */}
               <div className="group relative aspect-[3/4] overflow-hidden rounded-lg lg:col-span-1 md:col-span-2 lg:translate-y-12">
                 <Image
                   src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg"
@@ -1087,10 +1095,11 @@ export default function Page() {
                     <Button
                       onClick={() =>
                         addToSessionCart({
-                          id: "power-play",
+                          item_id: "power-play",
                           name: "Power Play",
                           price: 599,
-                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
                         })
                       }
                       className="bg-white text-black hover:bg-white/90"
@@ -1100,10 +1109,11 @@ export default function Page() {
                     <Button
                       onClick={() =>
                         addToPersonalCart({
-                          id: "power-play",
+                          item_id: "power-play",
                           name: "Power Play",
                           price: 599,
-                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
                         })
                       }
                       className="bg-black text-white hover:bg-black/90"
@@ -1133,13 +1143,17 @@ export default function Page() {
                     placeholder="Enter your email"
                     className="flex-1 rounded-full px-6 py-3 bg-white/10 border border-white/20 text-white placeholder:text-gray-400"
                   />
-                  <Button className="bg-white text-black hover:bg-white/90 rounded-full px-8">Subscribe</Button>
+                  <Button className="bg-white text-black hover:bg-white/90 rounded-full px-8">
+                    Subscribe
+                  </Button>
                 </form>
               </div>
             </div>
           </div>
         </section>
       </main>
+
+      {/* FOOTER */}
       <footer className="border-t border-gray-200">
         <div className="container px-4 py-12">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
@@ -1208,4 +1222,3 @@ export default function Page() {
     </div>
   )
 }
-
