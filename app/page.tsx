@@ -1,21 +1,53 @@
+"use client"
+
 import { Button } from "@/components/ui/button"
-import { ChevronRight, ShoppingBag, ArrowRight, User, LogOut } from 'lucide-react'
+import { ChevronRight, ShoppingBag, User, LogOut, Plus, Minus, X } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import ToastHandler from "@/components/ToastHandler"
+import { useState } from "react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { signout } from "./login/actions"
 
+type CartItem = {
+  id: string
+  name: string
+  price: number
+  quantity: number
+  image: string
+}
+
 export default function Page() {
+  const [cartItems, setCartItems] = useState<CartItem[]>([])
+  const [isCartOpen, setIsCartOpen] = useState(false)
+
+  const addToCart = (item: Omit<CartItem, "quantity">) => {
+    setCartItems((prevItems) => {
+      const existingItem = prevItems.find((i) => i.id === item.id)
+      if (existingItem) {
+        return prevItems.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i))
+      }
+      return [...prevItems, { ...item, quantity: 1 }]
+    })
+  }
+
+  const removeFromCart = (id: string) => {
+    setCartItems((prevItems) => prevItems.filter((item) => item.id !== id))
+  }
+
+  const updateQuantity = (id: string, delta: number) => {
+    setCartItems((prevItems) =>
+      prevItems
+        .map((item) => (item.id === id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item))
+        .filter((item) => item.quantity > 0),
+    )
+  }
+
+  const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0)
+  const totalPrice = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+
   return (
     <div className="flex flex-col min-h-screen bg-white">
-      <ToastHandler />
-
       <header className="fixed w-full z-50 bg-white/80 backdrop-blur-md">
         <div className="container flex h-20 items-center justify-between px-4">
           <Link href="#" className="text-3xl font-bold tracking-tighter">
@@ -33,9 +65,74 @@ export default function Page() {
             </Link>
           </nav>
           <div className="flex items-center gap-2">
-            <Button size="icon" variant="ghost" className="rounded-full h-12 w-12">
-              <ShoppingBag className="h-5 w-5" />
-            </Button>
+            <Sheet open={isCartOpen} onOpenChange={setIsCartOpen}>
+              <SheetTrigger asChild>
+                <Button size="icon" variant="ghost" className="rounded-full h-12 w-12 relative">
+                  <ShoppingBag className="h-5 w-5" />
+                  {totalItems > 0 && (
+                    <span className="absolute top-0 right-0 bg-rose-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                      {totalItems}
+                    </span>
+                  )}
+                </Button>
+              </SheetTrigger>
+              <SheetContent>
+                <SheetHeader>
+                  <SheetTitle>Your Cart</SheetTitle>
+                  <SheetDescription>
+                    You have {totalItems} item{totalItems !== 1 ? "s" : ""} in your cart
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="mt-6 space-y-4">
+                  {cartItems.map((item) => (
+                    <div key={item.id} className="flex items-center space-x-4">
+                      <Image
+                        src={item.image || "/placeholder.svg"}
+                        alt={item.name}
+                        width={60}
+                        height={60}
+                        className="rounded-md"
+                      />
+                      <div className="flex-1">
+                        <h3 className="text-sm font-medium">{item.name}</h3>
+                        <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
+                        <div className="flex items-center space-x-2 mt-1">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            onClick={() => updateQuantity(item.id, -1)}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <span className="text-sm">{item.quantity}</span>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            onClick={() => updateQuantity(item.id, 1)}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <Button size="icon" variant="ghost" onClick={() => removeFromCart(item.id)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                {cartItems.length > 0 && (
+                  <div className="mt-6 space-y-4">
+                    <div className="flex justify-between text-sm font-medium">
+                      <span>Total</span>
+                      <span>${totalPrice.toFixed(2)}</span>
+                    </div>
+                    <Button className="w-full">Checkout</Button>
+                  </div>
+                )}
+              </SheetContent>
+            </Sheet>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12">
@@ -98,8 +195,6 @@ export default function Page() {
               </p>
               <Button size="lg" className="bg-black text-white hover:bg-black/90 rounded-full px-8 h-14 text-lg">
                 Explore Collection
-
-
                 <ChevronRight className="ml-2 h-5 w-5" />
               </Button>
             </div>
@@ -130,10 +225,25 @@ export default function Page() {
                 <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
                   <h3 className="text-2xl font-bold text-white mb-2">Casual Luxe</h3>
                   <p className="text-white/80 mb-4">Effortless elegance for the modern sophisticate</p>
-                  <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
-                    Shop Now
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
+                  <div className="flex space-x-2">
+                    <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
+                      Shop Now
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        addToCart({
+                          id: "casual-luxe",
+                          name: "Casual Luxe",
+                          price: 299,
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
+                        })
+                      }
+                      className="bg-white text-black hover:bg-white/90"
+                    >
+                      Add to Cart
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="group relative aspect-[3/4] overflow-hidden rounded-lg">
@@ -147,10 +257,25 @@ export default function Page() {
                 <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
                   <h3 className="text-2xl font-bold text-white mb-2">Evening Drama</h3>
                   <p className="text-white/80 mb-4">Make an entrance in bold silhouettes</p>
-                  <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
-                    Shop Now
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
+                  <div className="flex space-x-2">
+                    <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
+                      Shop Now
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        addToCart({
+                          id: "evening-drama",
+                          name: "Evening Drama",
+                          price: 499,
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
+                        })
+                      }
+                      className="bg-white text-black hover:bg-white/90"
+                    >
+                      Add to Cart
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="group relative aspect-[3/4] overflow-hidden rounded-lg lg:col-span-1 md:col-span-2 lg:translate-y-12">
@@ -164,10 +289,25 @@ export default function Page() {
                 <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
                   <h3 className="text-2xl font-bold text-white mb-2">Power Play</h3>
                   <p className="text-white/80 mb-4">Commanding presence in every stitch</p>
-                  <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
-                    Shop Now
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
+                  <div className="flex space-x-2">
+                    <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
+                      Shop Now
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        addToCart({
+                          id: "power-play",
+                          name: "Power Play",
+                          price: 599,
+                          image:
+                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
+                        })
+                      }
+                      className="bg-white text-black hover:bg-white/90"
+                    >
+                      Add to Cart
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -264,3 +404,4 @@ export default function Page() {
     </div>
   )
 }
+
