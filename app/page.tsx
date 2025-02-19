@@ -8,7 +8,16 @@ import { useState, useCallback } from "react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { signout } from "./login/actions"
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from "@/utils/supabase/client"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 
 type CartItem = {
   id: string
@@ -23,7 +32,9 @@ export default function Page() {
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isGeneratingCode, setIsGeneratingCode] = useState(false)
   const [sessionCode, setSessionCode] = useState<string | null>(null)
-  const supabase = createClient();
+  const supabase = createClient()
+  const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false)
+  const [joinSessionCode, setJoinSessionCode] = useState("")
 
   const addToCart = (item: Omit<CartItem, "quantity">) => {
     setCartItems((prevItems) => {
@@ -52,8 +63,8 @@ export default function Page() {
 
   // Helper function to generate a random 6-character session code
   const generateRandomCode = (length = 6) => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    let code = ''
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    let code = ""
     for (let i = 0; i < length; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length))
     }
@@ -65,7 +76,9 @@ export default function Page() {
     setIsGeneratingCode(true)
 
     // 1. Get the current authenticated user
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (!user) {
       console.error("User not logged in")
       setIsGeneratingCode(false)
@@ -78,7 +91,7 @@ export default function Page() {
 
     // 3. Insert the session into the 'sessions' table
     const { data: sessionData, error: sessionError } = await supabase
-      .from('sessions')
+      .from("sessions")
       .insert([{ code, created_by: userId }])
       .select()
       .single()
@@ -91,7 +104,7 @@ export default function Page() {
 
     // 4. Add the current user to the 'session_users' table
     const { error: joinError } = await supabase
-      .from('session_users')
+      .from("session_users")
       .insert([{ session_id: sessionData.id, user_id: userId }])
 
     if (joinError) {
@@ -103,7 +116,7 @@ export default function Page() {
     // 5. Set the session code in state so it can be displayed
     setSessionCode(sessionData.code)
     setIsGeneratingCode(false)
-  }, [supabase])
+  }, [supabase, generateRandomCode])
 
   // Copy session code to clipboard
   const copyToClipboard = useCallback(() => {
@@ -111,6 +124,44 @@ export default function Page() {
       navigator.clipboard.writeText(sessionCode)
     }
   }, [sessionCode])
+
+  const joinSession = async () => {
+    if (!joinSessionCode) return
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      console.error("User not logged in")
+      return
+    }
+
+    // Find the session with the given code
+    const { data: sessionData, error: sessionError } = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("code", joinSessionCode)
+      .single()
+
+    if (sessionError || !sessionData) {
+      console.error("Session not found")
+      return
+    }
+
+    // Add the user to the session
+    const { error: joinError } = await supabase
+      .from("session_users")
+      .insert([{ session_id: sessionData.id, user_id: user.id }])
+
+    if (joinError) {
+      console.error("Error joining session:", joinError)
+      return
+    }
+
+    console.log("Successfully joined session")
+    setIsJoinDialogOpen(false)
+    setJoinSessionCode("")
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
@@ -142,6 +193,29 @@ export default function Page() {
                 Create Live Session
               </Button>
             )}
+            <Dialog open={isJoinDialogOpen} onOpenChange={setIsJoinDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="rounded-full px-4 h-12 bg-white text-black border border-black hover:bg-gray-100">
+                  Join Live Session
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Join Live Session</DialogTitle>
+                  <DialogDescription>Enter the 6-digit code to join an existing session.</DialogDescription>
+                </DialogHeader>
+                <div className="flex items-center space-x-2">
+                  <Input
+                    type="text"
+                    placeholder="Enter session code"
+                    value={joinSessionCode}
+                    onChange={(e) => setJoinSessionCode(e.target.value)}
+                    maxLength={6}
+                  />
+                  <Button onClick={joinSession}>Join</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
             {sessionCode && (
               <div className="flex items-center bg-gray-100 rounded-full h-12 px-4 border border-gray-700">
                 <input
@@ -494,3 +568,4 @@ export default function Page() {
     </div>
   )
 }
+
