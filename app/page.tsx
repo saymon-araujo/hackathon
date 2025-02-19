@@ -298,6 +298,8 @@ export default function Page() {
           filter: `session_id=eq.${sessionData.id}`,
         },
         async (payload) => {
+          console.log("Received realtime payload:", payload);
+
           await fetchSessionUsers()
           if (payload.eventType === "INSERT") {
             toast.success("A user joined the session")
@@ -334,6 +336,7 @@ export default function Page() {
       .subscribe()
 
     return () => {
+      console.log("Unsubscribing from channel");
       subscription.unsubscribe()
     }
   }, [supabase, sessionData])
@@ -359,18 +362,36 @@ export default function Page() {
 
     // Check if the current user is the session creator
     if (sessionData.created_by === user.id) {
+      // Option 1: Delete related rows manually
+      // Delete session cart items
+      const { error: cartError } = await supabase
+        .from("session_cart_items")
+        .delete()
+        .match({ session_id: sessionData.id })
+      if (cartError) {
+        toast.error("Error deleting session cart items")
+        return
+      }
+
       // Delete all session_users for the session
-      const { error } = await supabase.from("session_users").delete().match({ session_id: sessionData.id })
-      if (error) {
+      const { error: usersError } = await supabase
+        .from("session_users")
+        .delete()
+        .match({ session_id: sessionData.id })
+      if (usersError) {
         toast.error("Error disconnecting session")
         return
       }
-      // Delete the session row itself
-      const { error: sessionDeleteError } = await supabase.from("sessions").delete().match({ id: sessionData.id })
+      const { error: sessionDeleteError } = await supabase
+        .from("sessions")
+        .delete()
+        .match({ id: sessionData.id });
       if (sessionDeleteError) {
-        toast.error("Error deleting session")
-        return
+        toast.error("Error deleting session");
+        return;
       }
+
+
       setSessionData(null)
       setSessionCode(null)
       setSessionUsers([])
@@ -385,11 +406,11 @@ export default function Page() {
         toast.error("Error disconnecting from session")
         return
       }
-      // Update local state for session users
       setSessionUsers((prev) => prev.filter((p) => p.user_id !== user.id))
       toast.success("You have disconnected from the session")
     }
   }, [supabase, sessionData])
+
 
   useEffect(() => {
     if (!sessionData) return
