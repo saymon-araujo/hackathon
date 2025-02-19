@@ -1,10 +1,10 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { ChevronRight, ShoppingBag, User, LogOut, Plus, Minus, X } from "lucide-react"
+import { ChevronRight, ShoppingBag, User, LogOut, Plus, Minus, X, Copy, Loader2 } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { signout } from "./login/actions"
@@ -20,6 +20,8 @@ type CartItem = {
 export default function Page() {
   const [cartItems, setCartItems] = useState<CartItem[]>([])
   const [isCartOpen, setIsCartOpen] = useState(false)
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false)
+  const [sessionCode, setSessionCode] = useState<string | null>(null)
 
   const addToCart = (item: Omit<CartItem, "quantity">) => {
     setCartItems((prevItems) => {
@@ -46,6 +48,21 @@ export default function Page() {
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0)
   const totalPrice = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
+  const generateSessionCode = useCallback(() => {
+    setIsGeneratingCode(true)
+    setTimeout(() => {
+      const code = Math.floor(100000 + Math.random() * 900000).toString()
+      setSessionCode(code)
+      setIsGeneratingCode(false)
+    }, 1500) // Simulating API call delay
+  }, [])
+
+  const copyToClipboard = useCallback(() => {
+    if (sessionCode) {
+      navigator.clipboard.writeText(sessionCode)
+    }
+  }, [sessionCode])
+
   return (
     <div className="flex flex-col min-h-screen bg-white">
       <header className="fixed w-full z-50 bg-white/80 backdrop-blur-md">
@@ -65,6 +82,27 @@ export default function Page() {
             </Link>
           </nav>
           <div className="flex items-center gap-2">
+            {!sessionCode && <Button
+              onClick={generateSessionCode}
+              disabled={isGeneratingCode}
+              className="rounded-full px-4 h-12 bg-black text-white hover:bg-black/90"
+            >
+              {isGeneratingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Create Live Session
+            </Button>}
+            {sessionCode && (
+              <div className="flex items-center bg-gray-100 rounded-full h-12 px-4 border border-gray-700">
+                <input
+                  type="text"
+                  value={sessionCode}
+                  readOnly
+                  className="bg-transparent border-none focus:outline-none text-sm font-medium"
+                />
+                <Button onClick={copyToClipboard} size="icon" variant="ghost" className="ml-2 h-8 w-8">
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
             <Sheet open={isCartOpen} onOpenChange={setIsCartOpen}>
               <SheetTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12 relative">
