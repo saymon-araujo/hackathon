@@ -251,12 +251,12 @@ export default function Page() {
           .select("session_id, sessions(code, created_by)")
           .eq("user_id", user.id)
           .single()
-        if (joinedSession && joinedSession.sessions) {
-          setSessionCode(joinedSession.sessions.code)
+        if (joinedSession && joinedSession.sessions.length > 0) {
+          setSessionCode(joinedSession.sessions[0].code)
           setSessionData({
             id: joinedSession.session_id,
-            code: joinedSession.sessions.code,
-            created_by: joinedSession.sessions.created_by,
+            code: joinedSession.sessions[0].code,
+            created_by: joinedSession.sessions[0].created_by,
           })
         }
       }
@@ -303,7 +303,7 @@ export default function Page() {
       toast.error("Error checking session capacity")
       return
     }
-    if (count >= 5) {
+    if (count && count >= 5) {
       toast.error("Session is full")
       return
     }
