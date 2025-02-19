@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ChevronRight, ShoppingBag, User, LogOut, Plus, Minus, X, Copy, Loader2 } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { signout } from "./login/actions"
@@ -18,6 +18,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { toast } from "sonner"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 type CartItem = {
   id: string
@@ -27,15 +30,43 @@ type CartItem = {
   image: string
 }
 
+type SessionData = {
+  id: string
+  code: string
+  created_by: string
+}
+
+type Participant = {
+  id: string
+  user_id: string
+  joined_at: string
+  profiles: {
+    email: string
+    // add other fields if needed
+  }
+}
+
 export default function Page() {
+  // -------------------------------
+  // Local State
+  // -------------------------------
   const [cartItems, setCartItems] = useState<CartItem[]>([])
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isGeneratingCode, setIsGeneratingCode] = useState(false)
   const [sessionCode, setSessionCode] = useState<string | null>(null)
+  // sessionData holds the active session (created or joined)
+  const [sessionData, setSessionData] = useState<SessionData | null>(null)
+  // sessionUsers holds the list of participants (with profiles.email)
+  const [sessionUsers, setSessionUsers] = useState<Participant[]>([])
   const supabase = createClient()
   const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false)
   const [joinSessionCode, setJoinSessionCode] = useState("")
+  // New: Participants dialog to view participant emails
+  const [isParticipantsDialogOpen, setIsParticipantsDialogOpen] = useState(false)
 
+  // -------------------------------
+  // Cart helper functions
+  // -------------------------------
   const addToCart = (item: Omit<CartItem, "quantity">) => {
     setCartItems((prevItems) => {
       const existingItem = prevItems.find((i) => i.id === item.id)
@@ -61,6 +92,9 @@ export default function Page() {
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0)
   const totalPrice = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
+  // -------------------------------
+  // Session Creation Logic
+  // -------------------------------
   // Helper function to generate a random 6-character session code
   const generateRandomCode = (length = 6) => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -71,97 +105,244 @@ export default function Page() {
     return code
   }
 
-  // Generate session code by creating a session and adding the current user to it
+  // Create a new session by generating a code and adding the current user to it.
   const generateSessionCode = useCallback(async () => {
+    // Block if user is already in a session
+    if (sessionData) {
+      toast.error("You are already in a session")
+      return
+    }
     setIsGeneratingCode(true)
-
-    // 1. Get the current authenticated user
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) {
-      console.error("User not logged in")
+      toast.error("User not logged in")
       setIsGeneratingCode(false)
       return
     }
     const userId = user.id
 
-    // 2. Generate a unique session code
+    // Check if the user already created (or joined) a session.
+    const { data: existingSession } = await supabase.from("sessions").select("*").eq("created_by", userId).single()
+
+    if (existingSession) {
+      setSessionCode(existingSession.code)
+      console.log("existingSession", existingSession)
+      setSessionData(existingSession)
+      setIsGeneratingCode(false)
+      return
+    }
+
     const code = generateRandomCode()
 
-    // 3. Insert the session into the 'sessions' table
-    const { data: sessionData, error: sessionError } = await supabase
+    const { data: newSession, error: sessionError } = await supabase
       .from("sessions")
       .insert([{ code, created_by: userId }])
       .select()
       .single()
-
     if (sessionError) {
-      console.error("Error creating session:", sessionError)
+      toast.error("Error creating session")
       setIsGeneratingCode(false)
       return
     }
 
-    // 4. Add the current user to the 'session_users' table
     const { error: joinError } = await supabase
       .from("session_users")
-      .insert([{ session_id: sessionData.id, user_id: userId }])
-
+      .insert([{ session_id: newSession.id, user_id: userId }])
     if (joinError) {
-      console.error("Error adding user to session:", joinError)
+      toast.error("Error adding you to session")
       setIsGeneratingCode(false)
       return
     }
 
-    // 5. Set the session code in state so it can be displayed
-    setSessionCode(sessionData.code)
+    setSessionCode(newSession.code)
+    setSessionData(newSession)
     setIsGeneratingCode(false)
-  }, [supabase, generateRandomCode])
+  }, [supabase, sessionData, generateRandomCode])
 
-  // Copy session code to clipboard
-  const copyToClipboard = useCallback(() => {
-    if (sessionCode) {
-      navigator.clipboard.writeText(sessionCode)
+  // On mount, check if the current user already created or joined a session.
+  useEffect(() => {
+    const checkActiveSession = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+
+      console.log("user", user)
+
+      // Check for session created by the user.
+      const { data: activeSession } = await supabase.from("sessions").select("*").eq("created_by", user.id).single()
+      if (activeSession) {
+        setSessionCode(activeSession.code)
+        console.log("activeSession", activeSession)
+        setSessionData(activeSession)
+      } else {
+        // Optionally, check if the user has joined any session.
+        const { data: joinedSession } = await supabase
+          .from("session_users")
+          .select("session_id, sessions(code, created_by)")
+          .eq("user_id", user.id)
+          .single()
+        if (joinedSession && joinedSession.sessions) {
+          setSessionCode(joinedSession.sessions.code)
+          setSessionData({
+            id: joinedSession.session_id,
+            code: joinedSession.sessions.code,
+            created_by: joinedSession.sessions.created_by,
+          })
+        }
+      }
     }
-  }, [sessionCode])
+    checkActiveSession()
+  }, [supabase])
 
+  // -------------------------------
+  // Join Session Logic
+  // -------------------------------
+  // Called when a user enters a session code and clicks "Join"
   const joinSession = async () => {
+    // Block if user is already in a session
+    if (sessionData) {
+      toast.error("You are already in a session")
+      return
+    }
     if (!joinSessionCode) return
 
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) {
-      console.error("User not logged in")
+      toast.error("User not logged in")
       return
     }
 
-    // Find the session with the given code
-    const { data: sessionData, error: sessionError } = await supabase
+    const { data: foundSession, error: sessionError } = await supabase
       .from("sessions")
-      .select("id")
+      .select("id, code, created_by")
       .eq("code", joinSessionCode)
       .single()
-
-    if (sessionError || !sessionData) {
-      console.error("Session not found")
+    if (sessionError || !foundSession) {
+      toast.error("Session not found")
       return
     }
 
-    // Add the user to the session
+    if (foundSession.created_by === user.id) {
+      toast.error("You cannot join your own session")
+      return
+    }
+
+    const { count, error: countError } = await supabase
+      .from("session_users")
+      .select("*", { count: "exact", head: true })
+      .eq("session_id", foundSession.id)
+    if (countError) {
+      toast.error("Error checking session capacity")
+      return
+    }
+    if (count >= 5) {
+      toast.error("Session is full")
+      return
+    }
+
     const { error: joinError } = await supabase
       .from("session_users")
-      .insert([{ session_id: sessionData.id, user_id: user.id }])
-
+      .insert([{ session_id: foundSession.id, user_id: user.id }])
     if (joinError) {
-      console.error("Error joining session:", joinError)
+      toast.error("Error joining session")
       return
     }
 
-    console.log("Successfully joined session")
+    toast.success("Successfully joined session")
+
+    setSessionData(foundSession)
+    setSessionCode(foundSession.code)
     setIsJoinDialogOpen(false)
     setJoinSessionCode("")
   }
+
+  // -------------------------------
+  // Realtime subscription for session participants
+  // -------------------------------
+  useEffect(() => {
+    if (!sessionData) return
+
+    // Fetch session users joined with profiles to get emails.
+    const fetchSessionUsers = async () => {
+      const { data, error } = await supabase
+        .from("session_users")
+        .select("*, profiles(email)")
+        .eq("session_id", sessionData.id)
+
+      if (!error && data) {
+        setSessionUsers(data)
+      }
+    }
+    fetchSessionUsers()
+
+    const subscription = supabase
+      .channel(`session-users-${sessionData.id}`, {
+        config: { broadcast: { ack: true } },
+      })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "session_users",
+          filter: `session_id=eq.${sessionData.id}`,
+        },
+        async (payload) => {
+          // For simplicity, refetch the list on every change.
+          await fetchSessionUsers()
+          if (payload.eventType === "INSERT") {
+            toast.success("A user joined the session")
+          }
+          if (payload.eventType === "DELETE") {
+            toast("A user left the session")
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [supabase, sessionData])
+
+  // -------------------------------
+  // Helper: Copy session code to clipboard
+  // -------------------------------
+  const copyToClipboard = useCallback(() => {
+    if (sessionCode) {
+      navigator.clipboard.writeText(sessionCode)
+      toast.success("Copied to clipboard")
+    }
+  }, [sessionCode])
+
+  const disconnectFromSession = useCallback(async () => {
+    if (!sessionData) return
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { error } = await supabase
+      .from("session_users")
+      .delete()
+      .match({ session_id: sessionData.id, user_id: user.id })
+
+    if (error) {
+      toast.error("Error disconnecting from session")
+      return
+    }
+
+    setSessionData(null)
+    setSessionCode(null)
+    setSessionUsers([])
+    toast.success("Disconnected from session")
+  }, [supabase, sessionData])
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
@@ -182,53 +363,118 @@ export default function Page() {
             </Link>
           </nav>
           <div className="flex items-center gap-2">
-            {/* Create Session Button / Display Session Code */}
-            {!sessionCode && (
-              <Button
-                onClick={generateSessionCode}
-                disabled={isGeneratingCode}
-                className="rounded-full px-4 h-12 bg-black text-white hover:bg-black/90"
-              >
-                {isGeneratingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Create Live Session
-              </Button>
+            {/* If a session is active, display the session code with participant avatars and a button to view details */}
+            {sessionCode && (
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center bg-gray-100 rounded-full px-4 border border-gray-700">
+                  <input
+                    type="text"
+                    value={sessionCode}
+                    readOnly
+                    className="bg-transparent border-none focus:outline-none text-sm font-medium"
+                  />
+                  <Button onClick={copyToClipboard} size="icon" variant="ghost" className="ml-2 h-8 w-8">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center">
+                  <TooltipProvider>
+                    <span className="inline-flex items-center -space-x-4 mr-2">
+                      {sessionUsers.slice(0, 5).map((participant) => (
+                        <Tooltip key={participant.id}>
+                          <TooltipTrigger asChild>
+                            <Avatar className="w-8 h-8 border-2 border-white">
+                              <AvatarFallback>{participant.profiles?.email?.[0].toUpperCase() || "?"}</AvatarFallback>
+                            </Avatar>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{participant.profiles?.email || "No email available"}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ))}
+                      {sessionUsers.length > 5 && (
+                        <Avatar className="w-8 h-8 border-2 border-white">
+                          <AvatarFallback>+{sessionUsers.length - 5}</AvatarFallback>
+                        </Avatar>
+                      )}
+                    </span>
+                  </TooltipProvider>
+                  <Button variant="outline" size="sm" onClick={() => setIsParticipantsDialogOpen(true)}>
+                    Details
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={disconnectFromSession} className="ml-2">
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
             )}
-            <Dialog open={isJoinDialogOpen} onOpenChange={setIsJoinDialogOpen}>
-              <DialogTrigger asChild>
-                <Button className="rounded-full px-4 h-12 bg-white text-black border border-black hover:bg-gray-100">
-                  Join Live Session
+            {/* Block join and create if already in a session */}
+            {!sessionCode && (
+              <>
+                <Button
+                  onClick={generateSessionCode}
+                  disabled={isGeneratingCode}
+                  className="rounded-full px-4 h-12 bg-black text-white hover:bg-black/90"
+                >
+                  {isGeneratingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Create Live Session
                 </Button>
-              </DialogTrigger>
+                <Dialog open={isJoinDialogOpen} onOpenChange={setIsJoinDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="rounded-full px-4 h-12 bg-white text-black border border-black hover:bg-gray-100">
+                      Join Live Session
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Join Live Session</DialogTitle>
+                      <DialogDescription>Enter the 6-digit code to join an existing session.</DialogDescription>
+                    </DialogHeader>
+                    <div className="flex items-center space-x-2">
+                      <Input
+                        type="text"
+                        placeholder="Enter session code"
+                        value={joinSessionCode}
+                        onChange={(e) => setJoinSessionCode(e.target.value.toUpperCase())}
+                        maxLength={6}
+                      />
+                      <Button onClick={joinSession}>Join</Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </>
+            )}
+            {/* Participants Dialog */}
+            <Dialog open={isParticipantsDialogOpen} onOpenChange={setIsParticipantsDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Join Live Session</DialogTitle>
-                  <DialogDescription>Enter the 6-digit code to join an existing session.</DialogDescription>
+                  <DialogTitle>Session Participants</DialogTitle>
+                  <DialogDescription>Below are the participants in this session.</DialogDescription>
                 </DialogHeader>
-                <div className="flex items-center space-x-2">
-                  <Input
-                    type="text"
-                    placeholder="Enter session code"
-                    value={joinSessionCode}
-                    onChange={(e) => setJoinSessionCode(e.target.value)}
-                    maxLength={6}
-                  />
-                  <Button onClick={joinSession}>Join</Button>
+                <div className="space-y-4">
+                  <TooltipProvider>
+                    {sessionUsers.map((participant) => (
+                      <div key={participant.id} className="flex items-center space-x-4">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Avatar className="w-10 h-10">
+                              <AvatarFallback>{participant.profiles?.email?.[0].toUpperCase() || "?"}</AvatarFallback>
+                            </Avatar>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{participant.profiles?.email || "No email available"}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <span className="text-sm text-gray-700">
+                          {participant.profiles?.email || "No email available"}
+                        </span>
+                      </div>
+                    ))}
+                  </TooltipProvider>
                 </div>
               </DialogContent>
             </Dialog>
-            {sessionCode && (
-              <div className="flex items-center bg-gray-100 rounded-full h-12 px-4 border border-gray-700">
-                <input
-                  type="text"
-                  value={sessionCode}
-                  readOnly
-                  className="bg-transparent border-none focus:outline-none text-sm font-medium"
-                />
-                <Button onClick={copyToClipboard} size="icon" variant="ghost" className="ml-2 h-8 w-8">
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
+            {/* Cart Sheet */}
             <Sheet open={isCartOpen} onOpenChange={setIsCartOpen}>
               <SheetTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12 relative">
@@ -297,6 +543,7 @@ export default function Page() {
                 )}
               </SheetContent>
             </Sheet>
+            {/* User Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12">
@@ -322,6 +569,7 @@ export default function Page() {
         </div>
       </header>
       <main className="flex-1">
+        {/* Main banner */}
         <section className="relative min-h-screen flex items-center pt-20">
           <div className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
             <div className="relative h-full">
@@ -365,6 +613,7 @@ export default function Page() {
           </div>
         </section>
 
+        {/* Featured pieces */}
         <section className="py-24 md:py-32 bg-gray-50">
           <div className="container px-4">
             <div className="flex flex-col md:flex-row justify-between items-start mb-16">
@@ -478,6 +727,7 @@ export default function Page() {
           </div>
         </section>
 
+        {/* Newsletter / Subscribe section */}
         <section className="relative py-24 md:py-32 overflow-hidden">
           <div className="container px-4">
             <div className="relative z-10 bg-black text-white rounded-2xl p-8 md:p-16 overflow-hidden">
