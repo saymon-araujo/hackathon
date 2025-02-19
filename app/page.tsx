@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 type CartItem = {
   id: string
@@ -63,6 +64,11 @@ export default function Page() {
   const [joinSessionCode, setJoinSessionCode] = useState("")
   // New: Participants dialog to view participant emails
   const [isParticipantsDialogOpen, setIsParticipantsDialogOpen] = useState(false)
+  const [sessionCartItems, setSessionCartItems] = useState<CartItem[]>([])
+  const [personalCartItems, setPersonalCartItems] = useState<CartItem[]>([])
+
+
+  console.log("sessionCartItems", sessionCartItems)
 
   // -------------------------------
   // Cart helper functions
@@ -159,7 +165,7 @@ export default function Page() {
     setSessionCode(newSession.code)
     setSessionData(newSession)
     setIsGeneratingCode(false)
-  }, [supabase, sessionData, generateRandomCode])
+  }, [supabase, sessionData])
 
   // On mount, check if the current user already created or joined a session.
   useEffect(() => {
@@ -267,13 +273,12 @@ export default function Page() {
   useEffect(() => {
     if (!sessionData) return
 
-    // Fetch session users joined with profiles to get emails.
+    // Helper to fetch session users (with profiles.email)
     const fetchSessionUsers = async () => {
       const { data, error } = await supabase
         .from("session_users")
         .select("*, profiles(email)")
         .eq("session_id", sessionData.id)
-
       if (!error && data) {
         setSessionUsers(data)
       }
@@ -293,13 +298,36 @@ export default function Page() {
           filter: `session_id=eq.${sessionData.id}`,
         },
         async (payload) => {
-          // For simplicity, refetch the list on every change.
           await fetchSessionUsers()
           if (payload.eventType === "INSERT") {
             toast.success("A user joined the session")
           }
           if (payload.eventType === "DELETE") {
-            toast("A user left the session")
+            // Get the current authenticated user info
+            const {
+              data: { user },
+            } = await supabase.auth.getUser()
+            // If the deleted row belongs to the session creator…
+            if (payload.old.user_id === sessionData.created_by) {
+              setSessionData(null)
+              setSessionCode(null)
+              setSessionUsers([])
+              toast("Session creator disconnected. All users have been disconnected.")
+            }
+            // Otherwise, if the current user is the session creator,
+            // notify them of who disconnected
+            else if (sessionData.created_by === user.id) {
+              const { data: profileData } = await supabase
+                .from("profiles")
+                .select("email")
+                .eq("id", payload.old.user_id)
+                .single()
+              if (profileData) {
+                toast(`User ${profileData.email} has disconnected`)
+              } else {
+                toast("A user has disconnected")
+              }
+            }
           }
         },
       )
@@ -320,6 +348,7 @@ export default function Page() {
     }
   }, [sessionCode])
 
+  // Updated disconnect function
   const disconnectFromSession = useCallback(async () => {
     if (!sessionData) return
 
@@ -328,21 +357,257 @@ export default function Page() {
     } = await supabase.auth.getUser()
     if (!user) return
 
-    const { error } = await supabase
-      .from("session_users")
-      .delete()
-      .match({ session_id: sessionData.id, user_id: user.id })
+    // Check if the current user is the session creator
+    if (sessionData.created_by === user.id) {
+      // Delete all session_users for the session
+      const { error } = await supabase.from("session_users").delete().match({ session_id: sessionData.id })
+      if (error) {
+        toast.error("Error disconnecting session")
+        return
+      }
+      // Delete the session row itself
+      const { error: sessionDeleteError } = await supabase.from("sessions").delete().match({ id: sessionData.id })
+      if (sessionDeleteError) {
+        toast.error("Error deleting session")
+        return
+      }
+      setSessionData(null)
+      setSessionCode(null)
+      setSessionUsers([])
+      toast("Session creator disconnected. All users have been disconnected.")
+    } else {
+      // A participant is disconnecting: remove only their row
+      const { error } = await supabase
+        .from("session_users")
+        .delete()
+        .match({ session_id: sessionData.id, user_id: user.id })
+      if (error) {
+        toast.error("Error disconnecting from session")
+        return
+      }
+      // Update local state for session users
+      setSessionUsers((prev) => prev.filter((p) => p.user_id !== user.id))
+      toast.success("You have disconnected from the session")
+    }
+  }, [supabase, sessionData])
+
+  useEffect(() => {
+    if (!sessionData) return
+
+    const fetchSessionCartItems = async () => {
+      const { data, error } = await supabase.from("session_cart_items").select("*").eq("session_id", sessionData.id)
+      if (!error && data) {
+        setSessionCartItems(data)
+      }
+    }
+
+    fetchSessionCartItems()
+
+    const sessionCartSubscription = supabase
+      .channel(`session-cart-${sessionData.id}`, {
+        config: { broadcast: { ack: true } },
+      })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "session_cart_items",
+          filter: `session_id=eq.${sessionData.id}`,
+        },
+        async () => {
+          await fetchSessionCartItems()
+        },
+      )
+      .subscribe()
+
+    return () => {
+      sessionCartSubscription.unsubscribe()
+    }
+  }, [supabase, sessionData])
+
+  useEffect(() => {
+    const fetchPersonalCartItems = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const { data, error } = await supabase.from("personal_cart_items").select("*").eq("user_id", user.id)
+      if (!error && data) {
+        setPersonalCartItems(data)
+      }
+    }
+
+    fetchPersonalCartItems()
+
+    const personalCartSubscription = supabase
+      .channel("personal-cart", {
+        config: { broadcast: { ack: true } },
+      })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "personal_cart_items",
+          // Optionally filter by user id if needed
+        },
+        async () => {
+          await fetchPersonalCartItems()
+        },
+      )
+      .subscribe()
+
+    return () => {
+      personalCartSubscription.unsubscribe()
+    }
+  }, [supabase])
+
+  const addToSessionCart = async (item: Omit<CartItem, "quantity">) => {
+    if (!sessionData) {
+      toast.error("No active session")
+      return
+    }
+    // Upsert: if an item exists for this session, increment its quantity
+    const { error } = await supabase.from("session_cart_items").upsert(
+      [
+        {
+          session_id: sessionData.id,
+          item_id: item.id,
+          name: item.name,
+          price: item.price,
+          image: item.image,
+          quantity: 1,
+        },
+      ],
+      { onConflict: "session_id,item_id" },
+    )
 
     if (error) {
-      toast.error("Error disconnecting from session")
+      toast.error("Error adding item to shared cart")
+    }
+  }
+
+  const addToPersonalCart = async (item: Omit<CartItem, "quantity">) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      toast.error("User not logged in")
+      return
+    }
+    // Upsert into the personal cart table for this user
+    const { error } = await supabase.from("personal_cart_items").upsert(
+      [
+        {
+          user_id: user.id,
+          item_id: item.id,
+          name: item.name,
+          price: item.price,
+          image: item.image,
+          quantity: 1,
+        },
+      ],
+      { onConflict: "user_id,item_id" },
+    )
+    if (error) {
+      toast.error("Error adding item to personal cart")
+    }
+  }
+
+  const updatePersonalCartQuantity = async (itemId: string, delta: number) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { data, error } = await supabase
+      .from("personal_cart_items")
+      .select("quantity")
+      .eq("user_id", user.id)
+      .eq("item_id", itemId)
+      .single()
+
+    if (error) {
+      toast.error("Error updating item quantity")
       return
     }
 
-    setSessionData(null)
-    setSessionCode(null)
-    setSessionUsers([])
-    toast.success("Disconnected from session")
-  }, [supabase, sessionData])
+    const newQuantity = Math.max(0, (data?.quantity || 0) + delta)
+
+    if (newQuantity === 0) {
+      await removeFromPersonalCart(itemId)
+    } else {
+      const { error: updateError } = await supabase
+        .from("personal_cart_items")
+        .update({ quantity: newQuantity })
+        .eq("user_id", user.id)
+        .eq("item_id", itemId)
+
+      if (updateError) {
+        toast.error("Error updating item quantity")
+      }
+    }
+  }
+
+  const removeFromPersonalCart = async (itemId: string) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { error } = await supabase.from("personal_cart_items").delete().eq("user_id", user.id).eq("item_id", itemId)
+
+    if (error) {
+      toast.error("Error removing item from cart")
+    }
+  }
+
+  const updateSessionCartQuantity = async (itemId: string, delta: number) => {
+    if (!sessionData) return
+
+    const { data, error } = await supabase
+      .from("session_cart_items")
+      .select("quantity")
+      .eq("session_id", sessionData.id)
+      .eq("item_id", itemId)
+      .single()
+
+    if (error) {
+      toast.error("Error updating item quantity")
+      return
+    }
+
+    const newQuantity = Math.max(0, (data?.quantity || 0) + delta)
+
+    if (newQuantity === 0) {
+      await removeFromSessionCart(itemId)
+    } else {
+      const { error: updateError } = await supabase
+        .from("session_cart_items")
+        .update({ quantity: newQuantity })
+        .eq("session_id", sessionData.id)
+        .eq("item_id", itemId)
+
+      if (updateError) {
+        toast.error("Error updating item quantity")
+      }
+    }
+  }
+
+  const removeFromSessionCart = async (itemId: string) => {
+    if (!sessionData) return
+
+    const { error } = await supabase
+      .from("session_cart_items")
+      .delete()
+      .eq("session_id", sessionData.id)
+      .eq("item_id", itemId)
+
+    if (error) {
+      toast.error("Error removing item from session cart")
+    }
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
@@ -479,68 +744,136 @@ export default function Page() {
               <SheetTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12 relative">
                   <ShoppingBag className="h-5 w-5" />
-                  {totalItems > 0 && (
+                  {(personalCartItems.length > 0 || sessionCartItems.length > 0) && (
                     <span className="absolute top-0 right-0 bg-rose-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                      {totalItems}
+                      {personalCartItems.length + sessionCartItems.length}
                     </span>
                   )}
                 </Button>
               </SheetTrigger>
-              <SheetContent>
+              <SheetContent className="w-full sm:max-w-md">
                 <SheetHeader>
                   <SheetTitle>Your Cart</SheetTitle>
-                  <SheetDescription>
-                    You have {totalItems} item{totalItems !== 1 ? "s" : ""} in your cart
-                  </SheetDescription>
+                  <SheetDescription>Manage your personal and session items</SheetDescription>
                 </SheetHeader>
-                <div className="mt-6 space-y-4">
-                  {cartItems.map((item) => (
-                    <div key={item.id} className="flex items-center space-x-4">
-                      <Image
-                        src={item.image || "/placeholder.svg"}
-                        alt={item.name}
-                        width={60}
-                        height={60}
-                        className="rounded-md"
-                      />
-                      <div className="flex-1">
-                        <h3 className="text-sm font-medium">{item.name}</h3>
-                        <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
-                        <div className="flex items-center space-x-2 mt-1">
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            onClick={() => updateQuantity(item.id, -1)}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <span className="text-sm">{item.quantity}</span>
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            onClick={() => updateQuantity(item.id, 1)}
-                          >
-                            <Plus className="h-3 w-3" />
-                          </Button>
+                <Tabs defaultValue="personal" className="mt-6">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="personal">Personal Cart</TabsTrigger>
+                    <TabsTrigger value="session">Session Cart</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="personal" className="mt-4">
+                    <div className="space-y-4">
+                      {personalCartItems.length === 0 ? (
+                        <p className="text-center text-gray-500">Your personal cart is empty</p>
+                      ) : (
+                        personalCartItems.map((item) => (
+                          <div key={item.item_id} className="flex items-center space-x-4">
+                            <Image
+                              src={item.image || "/placeholder.svg"}
+                              alt={item.name}
+                              width={60}
+                              height={60}
+                              className="rounded-md"
+                            />
+                            <div className="flex-1">
+                              <h3 className="text-sm font-medium">{item.name}</h3>
+                              <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
+                              <div className="flex items-center space-x-2 mt-1">
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-6 w-6"
+                                  onClick={() => updatePersonalCartQuantity(item.item_id, -1)}
+                                >
+                                  <Minus className="h-3 w-3" />
+                                </Button>
+                                <span className="text-sm">{item.quantity}</span>
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-6 w-6"
+                                  onClick={() => updatePersonalCartQuantity(item.item_id, 1)}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                            <Button size="icon" variant="ghost" onClick={() => removeFromPersonalCart(item.item_id)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {personalCartItems.length > 0 && (
+                      <div className="mt-6 space-y-4">
+                        <div className="flex justify-between text-sm font-medium">
+                          <span>Total</span>
+                          <span>
+                            ${personalCartItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
+                          </span>
                         </div>
+                        <Button className="w-full">Checkout Personal Cart</Button>
                       </div>
-                      <Button size="icon" variant="ghost" onClick={() => removeFromCart(item.id)}>
-                        <X className="h-4 w-4" />
-                      </Button>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="session" className="mt-4">
+                    <div className="space-y-4">
+                      {sessionCartItems.length === 0 ? (
+                        <p className="text-center text-gray-500">The session cart is empty</p>
+                      ) : (
+                        sessionCartItems.map((item) => (
+                          <div key={item.item_id} className="flex items-center space-x-4">
+                            <Image
+                              src={item.image || "/placeholder.svg"}
+                              alt={item.name}
+                              width={60}
+                              height={60}
+                              className="rounded-md"
+                            />
+                            <div className="flex-1">
+                              <h3 className="text-sm font-medium">{item.name}</h3>
+                              <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
+                              <div className="flex items-center space-x-2 mt-1">
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-6 w-6"
+                                  onClick={() => updateSessionCartQuantity(item.item_id, -1)}
+                                >
+                                  <Minus className="h-3 w-3" />
+                                </Button>
+                                <span className="text-sm">{item.quantity}</span>
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-6 w-6"
+                                  onClick={() => updateSessionCartQuantity(item.item_id, 1)}
+                                >
+                                  <Plus className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                            <Button size="icon" variant="ghost" onClick={() => removeFromSessionCart(item.item_id)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
                     </div>
-                  ))}
-                </div>
-                {cartItems.length > 0 && (
-                  <div className="mt-6 space-y-4">
-                    <div className="flex justify-between text-sm font-medium">
-                      <span>Total</span>
-                      <span>${totalPrice.toFixed(2)}</span>
-                    </div>
-                    <Button className="w-full">Checkout</Button>
-                  </div>
-                )}
+                    {sessionCartItems.length > 0 && (
+                      <div className="mt-6 space-y-4">
+                        <div className="flex justify-between text-sm font-medium">
+                          <span>Total</span>
+                          <span>
+                            ${sessionCartItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
+                          </span>
+                        </div>
+                        <Button className="w-full">Checkout Session Cart</Button>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </SheetContent>
             </Sheet>
             {/* User Dropdown */}
@@ -575,7 +908,7 @@ export default function Page() {
             <div className="relative h-full">
               <Image
                 src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg"
-                alt="Pink tailored blazer suit"
+                alt="Pink power suit"
                 fill
                 className="object-cover rounded-lg"
                 priority
@@ -644,17 +977,29 @@ export default function Page() {
                     </Button>
                     <Button
                       onClick={() =>
-                        addToCart({
+                        addToSessionCart({
                           id: "casual-luxe",
                           name: "Casual Luxe",
                           price: 299,
-                          image:
-                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
+                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
                         })
                       }
                       className="bg-white text-black hover:bg-white/90"
                     >
-                      Add to Cart
+                      Add to Shared Cart
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        addToPersonalCart({
+                          id: "casual-luxe",
+                          name: "Casual Luxe",
+                          price: 299,
+                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Sydne-Style-shows-how-to-wear-the-maxi-skirt-trend-with-summer-outfit-ideas-by-fashion-blogger-andee-layne-2883476417.jpg-6XpLdf2OozNDq0vxMvNP9wjmOZoccw.jpeg",
+                        })
+                      }
+                      className="bg-black text-white hover:bg-black/90"
+                    >
+                      Add to Personal Cart
                     </Button>
                   </div>
                 </div>
@@ -676,17 +1021,29 @@ export default function Page() {
                     </Button>
                     <Button
                       onClick={() =>
-                        addToCart({
+                        addToSessionCart({
                           id: "evening-drama",
                           name: "Evening Drama",
                           price: 499,
-                          image:
-                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
+                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
                         })
                       }
                       className="bg-white text-black hover:bg-white/90"
                     >
-                      Add to Cart
+                      Add to Shared Cart
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        addToPersonalCart({
+                          id: "evening-drama",
+                          name: "Evening Drama",
+                          price: 499,
+                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/F29Z8TGDCL0_N0000_1.jpg-voj4jJkQppwcRfkvk4Fe3DMp1uOOdL.jpeg",
+                        })
+                      }
+                      className="bg-black text-white hover:bg-black/90"
+                    >
+                      Add to Personal Cart
                     </Button>
                   </div>
                 </div>
@@ -708,17 +1065,29 @@ export default function Page() {
                     </Button>
                     <Button
                       onClick={() =>
-                        addToCart({
+                        addToSessionCart({
                           id: "power-play",
                           name: "Power Play",
                           price: 599,
-                          image:
-                            "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
+                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
                         })
                       }
                       className="bg-white text-black hover:bg-white/90"
                     >
-                      Add to Cart
+                      Add to Shared Cart
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        addToPersonalCart({
+                          id: "power-play",
+                          name: "Power Play",
+                          price: 599,
+                          image: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/rr-dna_ss25-J1MIYfkKjyt8lGklXsHyaKRUZPG4JK.jpeg",
+                        })
+                      }
+                      className="bg-black text-white hover:bg-black/90"
+                    >
+                      Add to Personal Cart
                     </Button>
                   </div>
                 </div>
