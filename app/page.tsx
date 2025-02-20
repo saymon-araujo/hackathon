@@ -51,10 +51,23 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // -----------------------------------------------------------------------------
+// Agora Imports for Video Streaming
+// -----------------------------------------------------------------------------
+import {
+  LocalUser,
+  RemoteUser,
+  useJoin,
+  useLocalMicrophoneTrack,
+  useLocalCameraTrack,
+  usePublish,
+  useRemoteUsers,
+} from "agora-rtc-react"
+import AgoraRTC, { AgoraRTCProvider } from "agora-rtc-react"
+
+// -----------------------------------------------------------------------------
 // Type definitions
 // -----------------------------------------------------------------------------
 
-// Updated CartItem type to use "item_id" consistently (as returned by Supabase)
 type CartItem = {
   item_id: string
   name: string
@@ -75,7 +88,6 @@ type Participant = {
   joined_at: string
   profiles: {
     email: string
-    // add other fields if needed
   }
 }
 
@@ -125,21 +137,11 @@ function CartItemRow({ item, onUpdate, onRemove }: CartItemRowProps) {
         <h3 className="text-sm font-medium">{item.name}</h3>
         <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
         <div className="flex items-center space-x-2 mt-1">
-          <Button
-            size="icon"
-            variant="outline"
-            className="h-6 w-6"
-            onClick={() => onUpdate(item.item_id, -1)}
-          >
+          <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => onUpdate(item.item_id, -1)}>
             <Minus className="h-3 w-3" />
           </Button>
           <span className="text-sm">{item.quantity}</span>
-          <Button
-            size="icon"
-            variant="outline"
-            className="h-6 w-6"
-            onClick={() => onUpdate(item.item_id, 1)}
-          >
+          <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => onUpdate(item.item_id, 1)}>
             <Plus className="h-3 w-3" />
           </Button>
         </div>
@@ -152,13 +154,116 @@ function CartItemRow({ item, onUpdate, onRemove }: CartItemRowProps) {
 }
 
 // -----------------------------------------------------------------------------
+// Agora Video Calling Components
+// -----------------------------------------------------------------------------
+
+type VideoCallProps = {
+  appId: string
+  channel: string
+  token?: string
+}
+
+/** Component that contains the video call logic and UI */
+const VideoCallComponent = ({ appId, channel, token }: VideoCallProps) => {
+  const [callStarted, setCallStarted] = useState(false)
+  const [micOn, setMicOn] = useState(true)
+  const [cameraOn, setCameraOn] = useState(true)
+
+  // Log when the user clicks to start the call.
+  const handleStartCall = () => {
+    console.log("User clicked join video call")
+    setCallStarted(true)
+  }
+
+  // Join the channel only when callStarted is true.
+  const joinResult = useJoin({ appid: appId, channel, token: token ? token : null }, callStarted)
+
+  // Log join result changes.
+  useEffect(() => {
+    console.log("Join result:", joinResult)
+  }, [joinResult])
+
+  // Create local tracks only if call has started.
+  const { localMicrophoneTrack } = useLocalMicrophoneTrack(callStarted ? micOn : false)
+  const { localCameraTrack } = useLocalCameraTrack(callStarted ? cameraOn : false)
+
+  // Log the local tracks
+  useEffect(() => {
+    console.log("Local Microphone Track:", localMicrophoneTrack)
+  }, [localMicrophoneTrack])
+  useEffect(() => {
+    console.log("Local Camera Track:", localCameraTrack)
+  }, [localCameraTrack])
+
+  // Publish the local audio and video tracks.
+  const publishResult = usePublish([localMicrophoneTrack, localCameraTrack])
+  useEffect(() => {
+    console.log("Publish result:", publishResult)
+  }, [publishResult])
+
+  const remoteUsers = useRemoteUsers()
+  useEffect(() => {
+    console.log("Remote Users:", remoteUsers)
+  }, [remoteUsers])
+
+  if (!callStarted) {
+    return (
+      <div className="flex flex-col items-center">
+        <Button onClick={handleStartCall}>Join Video Call</Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-center space-y-4">
+      {/* Controls */}
+      <div className="flex space-x-4">
+        <Button onClick={() => { setMicOn((prev) => !prev); console.log("Mic toggled:", !micOn) }}>
+          {micOn ? "Mute Mic" : "Unmute Mic"}
+        </Button>
+        <Button onClick={() => { setCameraOn((prev) => !prev); console.log("Camera toggled:", !cameraOn) }}>
+          {cameraOn ? "Turn Off Camera" : "Turn On Camera"}
+        </Button>
+      </div>
+      {/* Video Streams */}
+      <div className="flex flex-wrap justify-center gap-4">
+        {/* Local video */}
+        <div style={{ width: "320px", height: "240px" }} className="border">
+          <LocalUser
+            audioTrack={localMicrophoneTrack}
+            videoTrack={localCameraTrack}
+            micOn={micOn}
+            cameraOn={cameraOn}
+            style={{ width: "100%", height: "100%" }}
+          />
+        </div>
+        {/* Remote users */}
+        {remoteUsers.map((user) => (
+          <div key={user.uid} style={{ width: "320px", height: "240px" }} className="border">
+            <RemoteUser user={user} style={{ width: "100%", height: "100%" }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Wraps VideoCallComponent in the AgoraRTCProvider */
+const VideoCall = ({ appId, channel, token }: VideoCallProps) => {
+  const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" })
+  console.log("Initializing Agora client for channel:", channel)
+  return (
+    <AgoraRTCProvider client={client}>
+      <VideoCallComponent appId={appId} channel={channel} token={token} />
+    </AgoraRTCProvider>
+  )
+}
+
+// -----------------------------------------------------------------------------
 // Main component
 // -----------------------------------------------------------------------------
 
 export default function Page() {
-  // -------------------------------
-  // Local State
-  // -------------------------------
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isGeneratingCode, setIsGeneratingCode] = useState(false)
   const [sessionCode, setSessionCode] = useState<string | null>(null)
@@ -186,8 +291,6 @@ export default function Page() {
       setIsGeneratingCode(false)
       return
     }
-
-    // Check if the user already created a session.
     const { data: existingSession } = await supabase
       .from("sessions")
       .select("*")
@@ -195,6 +298,7 @@ export default function Page() {
       .single()
 
     if (existingSession) {
+      console.log("Existing session found:", existingSession)
       setSessionCode(existingSession.code)
       setSessionData(existingSession)
       setIsGeneratingCode(false)
@@ -210,48 +314,48 @@ export default function Page() {
 
     if (sessionError) {
       toast.error("Error creating session")
+      console.error("Session creation error:", sessionError)
       setIsGeneratingCode(false)
       return
     }
 
-    // Add current user to the session_users table.
     const { error: joinError } = await supabase
       .from("session_users")
       .insert([{ session_id: newSession.id, user_id: user.id }])
     if (joinError) {
       toast.error("Error adding you to session")
+      console.error("Session join error:", joinError)
       setIsGeneratingCode(false)
       return
     }
 
+    console.log("New session created:", newSession)
     setSessionCode(newSession.code)
     setSessionData(newSession)
     setIsGeneratingCode(false)
   }, [supabase, sessionData])
 
-  // On mount, check if the current user already has an active session.
   useEffect(() => {
     const checkActiveSession = async () => {
       const user = await getUser(supabase)
       if (!user) return
-
-      // Check for a session created by the user.
       const { data: activeSession } = await supabase
         .from("sessions")
         .select("*")
         .eq("created_by", user.id)
         .single()
       if (activeSession) {
+        console.log("Active session found:", activeSession)
         setSessionCode(activeSession.code)
         setSessionData(activeSession)
       } else {
-        // Optionally, check if the user has joined any session.
         const { data: joinedSession } = await supabase
           .from("session_users")
           .select("session_id, sessions(code, created_by)")
           .eq("user_id", user.id)
           .single()
         if (joinedSession && joinedSession.sessions.length > 0) {
+          console.log("Joined session found:", joinedSession)
           setSessionCode(joinedSession.sessions[0].code)
           setSessionData({
             id: joinedSession.session_id,
@@ -273,13 +377,11 @@ export default function Page() {
       return
     }
     if (!joinSessionCode) return
-
     const user = await getUser(supabase)
     if (!user) {
       toast.error("User not logged in")
       return
     }
-
     const { data: foundSession, error: sessionError } = await supabase
       .from("sessions")
       .select("id, code, created_by")
@@ -287,35 +389,34 @@ export default function Page() {
       .single()
     if (sessionError || !foundSession) {
       toast.error("Session not found")
+      console.error("Join session error:", sessionError)
       return
     }
-
     if (foundSession.created_by === user.id) {
       toast.error("You cannot join your own session")
       return
     }
-
     const { count, error: countError } = await supabase
       .from("session_users")
       .select("*", { count: "exact", head: true })
       .eq("session_id", foundSession.id)
     if (countError) {
       toast.error("Error checking session capacity")
+      console.error("Capacity check error:", countError)
       return
     }
     if (count && count >= 5) {
       toast.error("Session is full")
       return
     }
-
     const { error: joinError } = await supabase
       .from("session_users")
       .insert([{ session_id: foundSession.id, user_id: user.id }])
     if (joinError) {
       toast.error("Error joining session")
+      console.error("Insert join error:", joinError)
       return
     }
-
     toast.success("Successfully joined session")
     setSessionData(foundSession)
     setSessionCode(foundSession.code)
@@ -328,18 +429,17 @@ export default function Page() {
   // -------------------------------
   useEffect(() => {
     if (!sessionData) return
-
     const fetchSessionUsers = async () => {
       const { data, error } = await supabase
         .from("session_users")
         .select("*, profiles(email)")
         .eq("session_id", sessionData.id)
       if (!error && data) {
+        console.log("Fetched session users:", data)
         setSessionUsers(data)
       }
     }
     fetchSessionUsers()
-
     const subscription = supabase
       .channel(`session-users-${sessionData.id}`, {
         config: { broadcast: { ack: true } },
@@ -353,6 +453,7 @@ export default function Page() {
           filter: `session_id=eq.${sessionData.id}`,
         },
         async (payload) => {
+          console.log("Realtime payload:", payload)
           await fetchSessionUsers()
           if (payload.eventType === "INSERT") {
             toast.success("A user joined the session")
@@ -380,7 +481,6 @@ export default function Page() {
         },
       )
       .subscribe()
-
     return () => {
       subscription.unsubscribe()
     }
@@ -401,12 +501,9 @@ export default function Page() {
   // -------------------------------
   const disconnectFromSession = useCallback(async () => {
     if (!sessionData) return
-
     const user = await getUser(supabase)
     if (!user) return
-
     if (sessionData.created_by === user.id) {
-      // If session creator disconnects, delete all related session data.
       const { error: cartError } = await supabase
         .from("session_cart_items")
         .delete()
@@ -436,7 +533,6 @@ export default function Page() {
       setSessionUsers([])
       toast("Session creator disconnected. All users have been disconnected.")
     } else {
-      // A participant disconnects: remove only their row.
       const { error } = await supabase
         .from("session_users")
         .delete()
@@ -455,18 +551,17 @@ export default function Page() {
   // -------------------------------
   useEffect(() => {
     if (!sessionData) return
-
     const fetchSessionCartItems = async () => {
       const { data, error } = await supabase
         .from("session_cart_items")
         .select("*")
         .eq("session_id", sessionData.id)
       if (!error && data) {
+        console.log("Fetched session cart items:", data)
         setSessionCartItems(data)
       }
     }
     fetchSessionCartItems()
-
     const sessionCartSubscription = supabase
       .channel(`session-cart-${sessionData.id}`, {
         config: { broadcast: { ack: true } },
@@ -484,7 +579,6 @@ export default function Page() {
         },
       )
       .subscribe()
-
     return () => {
       sessionCartSubscription.unsubscribe()
     }
@@ -502,11 +596,11 @@ export default function Page() {
         .select("*")
         .eq("user_id", user.id)
       if (!error && data) {
+        console.log("Fetched personal cart items:", data)
         setPersonalCartItems(data)
       }
     }
     fetchPersonalCartItems()
-
     const personalCartSubscription = supabase
       .channel("personal-cart", {
         config: { broadcast: { ack: true } },
@@ -523,15 +617,11 @@ export default function Page() {
         },
       )
       .subscribe()
-
     return () => {
       personalCartSubscription.unsubscribe()
     }
   }, [supabase])
 
-  // -------------------------------
-  // Cart Update Functions
-  // -------------------------------
   const addToSessionCart = async (item: Omit<CartItem, "quantity">) => {
     if (!sessionData) {
       toast.error("No active session")
@@ -582,7 +672,6 @@ export default function Page() {
   const updatePersonalCartQuantity = async (itemId: string, delta: number) => {
     const user = await getUser(supabase)
     if (!user) return
-
     const { data, error } = await supabase
       .from("personal_cart_items")
       .select("quantity")
@@ -611,7 +700,6 @@ export default function Page() {
   const removeFromPersonalCart = async (itemId: string) => {
     const user = await getUser(supabase)
     if (!user) return
-
     const { error } = await supabase
       .from("personal_cart_items")
       .delete()
@@ -624,7 +712,6 @@ export default function Page() {
 
   const updateSessionCartQuantity = async (itemId: string, delta: number) => {
     if (!sessionData) return
-
     const { data, error } = await supabase
       .from("session_cart_items")
       .select("quantity")
@@ -662,10 +749,6 @@ export default function Page() {
     }
   }
 
-  // -------------------------------
-  // Render
-  // -------------------------------
-  // Calculate total badge count
   const totalCartCount = personalCartItems.length + sessionCartItems.length
 
   return (
@@ -688,7 +771,6 @@ export default function Page() {
             </Link>
           </nav>
           <div className="flex items-center gap-2">
-            {/* Session Info */}
             {sessionCode && (
               <div className="flex items-center space-x-2">
                 <div className="flex items-center bg-gray-100 rounded-full px-4 border border-gray-700">
@@ -735,7 +817,6 @@ export default function Page() {
                 </div>
               </div>
             )}
-            {/* Session creation/join buttons */}
             {!sessionCode && (
               <>
                 <Button
@@ -743,9 +824,7 @@ export default function Page() {
                   disabled={isGeneratingCode}
                   className="rounded-full px-4 h-12 bg-black text-white hover:bg-black/90"
                 >
-                  {isGeneratingCode ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : null}
+                  {isGeneratingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                   Create Live Session
                 </Button>
                 <Dialog open={isJoinDialogOpen} onOpenChange={setIsJoinDialogOpen}>
@@ -775,39 +854,6 @@ export default function Page() {
                 </Dialog>
               </>
             )}
-            {/* Participants Dialog */}
-            <Dialog open={isParticipantsDialogOpen} onOpenChange={setIsParticipantsDialogOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Session Participants</DialogTitle>
-                  <DialogDescription>Below are the participants in this session.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <TooltipProvider>
-                    {sessionUsers.map((participant) => (
-                      <div key={participant.id} className="flex items-center space-x-4">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Avatar className="w-10 h-10">
-                              <AvatarFallback>
-                                {participant.profiles?.email?.[0].toUpperCase() || "?"}
-                              </AvatarFallback>
-                            </Avatar>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{participant.profiles?.email || "No email available"}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                        <span className="text-sm text-gray-700">
-                          {participant.profiles?.email || "No email available"}
-                        </span>
-                      </div>
-                    ))}
-                  </TooltipProvider>
-                </div>
-              </DialogContent>
-            </Dialog>
-            {/* Cart Sheet */}
             <Sheet open={isCartOpen} onOpenChange={setIsCartOpen}>
               <SheetTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12 relative">
@@ -832,9 +878,7 @@ export default function Page() {
                   <TabsContent value="personal" className="mt-4">
                     <div className="space-y-4">
                       {personalCartItems.length === 0 ? (
-                        <p className="text-center text-gray-500">
-                          Your personal cart is empty
-                        </p>
+                        <p className="text-center text-gray-500">Your personal cart is empty</p>
                       ) : (
                         personalCartItems.map((item) => (
                           <CartItemRow
@@ -851,10 +895,7 @@ export default function Page() {
                         <div className="flex justify-between text-sm font-medium">
                           <span>Total</span>
                           <span>
-                            $
-                            {personalCartItems
-                              .reduce((sum, item) => sum + item.price * item.quantity, 0)
-                              .toFixed(2)}
+                            ${personalCartItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
                           </span>
                         </div>
                         <Button className="w-full">Checkout Personal Cart</Button>
@@ -881,10 +922,7 @@ export default function Page() {
                         <div className="flex justify-between text-sm font-medium">
                           <span>Total</span>
                           <span>
-                            $
-                            {sessionCartItems
-                              .reduce((sum, item) => sum + item.price * item.quantity, 0)
-                              .toFixed(2)}
+                            ${sessionCartItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
                           </span>
                         </div>
                         <Button className="w-full">Checkout Session Cart</Button>
@@ -894,7 +932,6 @@ export default function Page() {
                 </Tabs>
               </SheetContent>
             </Sheet>
-            {/* User Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="icon" variant="ghost" className="rounded-full h-12 w-12">
@@ -922,7 +959,6 @@ export default function Page() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1">
-        {/* Main Banner */}
         <section className="relative min-h-screen flex items-center pt-20">
           <div className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
             <div className="relative h-full">
@@ -991,9 +1027,7 @@ export default function Page() {
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
                   <h3 className="text-2xl font-bold text-white mb-2">Casual Luxe</h3>
-                  <p className="text-white/80 mb-4">
-                    Effortless elegance for the modern sophisticate
-                  </p>
+                  <p className="text-white/80 mb-4">Effortless elegance for the modern sophisticate</p>
                   <div className="flex space-x-2">
                     <Button variant="outline" className="bg-white/10 border-white text-white hover:bg-white/20">
                       Shop Now
@@ -1151,6 +1185,24 @@ export default function Page() {
             </div>
           </div>
         </section>
+
+        {/* Live Video Session (Agora) */}
+        {sessionData && sessionCode && (
+          <section className="py-12 bg-gray-100">
+            <div className="container px-4">
+              <h2 className="text-2xl font-bold text-center mb-4">Live Video Session</h2>
+              {/*
+                Replace the placeholders below with your actual Agora App ID and temporary token.
+                The channel name is set to the session code.
+              */}
+              <VideoCall
+                appId="f36445b62ae64d5d9ab6a86dd9989589"
+                token="007eJxTYNil8OHOCY6dfdsfhUw5cXGt1rl1785vujzX9tnCA9E5ggE1CgxpxmYmJqZJZkaJqWYmKaYplolJZokWZikplpYWlqYWlt0529IbAhkZUh8zsDIyQCCIz8ZgYGnsEejLwAAAxEkiuA=="
+                channel={sessionCode}
+              />
+            </div>
+          </section>
+        )}
       </main>
 
       {/* FOOTER */}

@@ -38,6 +38,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.48.1
         version: 2.48.1
+      agora-rtc-react:
+        specifier: ^2.3.0
+        version: 2.3.0(react@19.0.0)
       axios:
         specifier: ^1.7.9
         version: 1.7.9
@@ -876,6 +879,12 @@ packages:
     resolution: {integrity: sha512-cl669nCJTZBsL97OF4kUQm5g5hC2uihk0NxY3WENAC0TYdILVkAyHymAntgxGkl7K+t0cXIrH5siy5S4XkFycA==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  agora-rtc-react@2.3.0:
+    resolution: {integrity: sha512-6D0uvXoZFlwQ/DClceJ1PUCpaHv3ebfMKFOnU0DXbiLpeMeYWM2uyuvfrcDjg4fGf033wPEzXVJHS0wx/miyJw==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      react: '>=16.8'
 
   ajv@6.12.6:
     resolution: {integrity: sha512-j3fVLgvTo527anyYyJOGTYJbG+vnnQYvE0m5mmkc1TK+nxAppkCLMIL0aZ4dblVCNoGShhm+kzE4ZUykBoMg4g==}
@@ -3169,6 +3178,10 @@ snapshots:
       acorn: 8.14.0
 
   acorn@8.14.0: {}
+
+  agora-rtc-react@2.3.0(react@19.0.0):
+    dependencies:
+      react: 19.0.0
 
   ajv@6.12.6:
     dependencies:
