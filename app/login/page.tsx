@@ -1,4 +1,3 @@
-// app/login/page.tsx
 import { GalleryVerticalEnd } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -7,12 +6,14 @@ import { Label } from "@/components/ui/label"
 import { login, signup } from "./actions"
 import ToastHandler from "@/components/ToastHandler"
 import Image from "next/image"
+import { Suspense } from "react"
 
 export default function LoginPage() {
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
-      {/* Include the toast handler */}
-      <ToastHandler />
+      <Suspense fallback={<div></div>}>
+        <ToastHandler />
+      </Suspense>
 
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex justify-center gap-2 md:justify-start">

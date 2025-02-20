@@ -21,8 +21,8 @@ export default function ToastHandler() {
       })
     }
 
-    if (toastParam) {
-      // Remove the query parameter to avoid showing the toast repeatedly.
+    if (toastParam && typeof window !== 'undefined') {
+      // Safely access window only on the client
       const url = new URL(window.location.href)
       url.searchParams.delete('toast')
       router.replace(url.toString())

@@ -1,5 +1,6 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { ChevronRight, ShoppingBag, User, LogOut, Plus, Minus, X, Copy, Loader2 } from "lucide-react"
 import Image from "next/image"
@@ -23,19 +24,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-// -----------------------------------------------------------------------------
-// Agora Imports for Video Streaming
-// -----------------------------------------------------------------------------
-import {
-  LocalUser,
-  RemoteUser,
-  useJoin,
-  useLocalMicrophoneTrack,
-  useLocalCameraTrack,
-  usePublish,
-  useRemoteUsers,
-} from "agora-rtc-react"
-import AgoraRTC, { AgoraRTCProvider } from "agora-rtc-react"
+// ------------------------------
+// Dynamic Import for VideoCall Component
+// ------------------------------
+const VideoCallDynamic = dynamic(() => import("@/components/VideoCall"), { ssr: false })
 
 // -----------------------------------------------------------------------------
 // Type definitions
@@ -117,214 +109,6 @@ function CartItemRow({ item, onUpdate, onRemove }: CartItemRowProps) {
         <X className="h-4 w-4" />
       </Button>
     </div>
-  )
-}
-
-// -----------------------------------------------------------------------------
-// Agora Video Calling Components
-// -----------------------------------------------------------------------------
-
-type VideoCallProps = {
-  appId: string
-  channel: string
-  token?: string
-}
-
-/** Component that contains the video call logic and UI */
-const VideoCallComponent = ({ appId, channel, token }: VideoCallProps) => {
-  const [callStarted, setCallStarted] = useState(false)
-  const [micOn, setMicOn] = useState(true)
-  const [cameraOn, setCameraOn] = useState(true)
-  const [isMinimized, setIsMinimized] = useState(false)
-
-  const handleStartCall = () => {
-    console.log("User clicked join video call")
-    setCallStarted(true)
-  }
-
-  // Join the channel
-  const joinResult = useJoin({ appid: appId, channel, token: token ? token : null }, callStarted)
-
-  // Create tracks based on state
-  const { localMicrophoneTrack } = useLocalMicrophoneTrack(micOn && callStarted)
-  const { localCameraTrack } = useLocalCameraTrack(cameraOn && callStarted)
-
-  // Handle mic toggle
-  const toggleMic = useCallback(() => {
-    if (localMicrophoneTrack) {
-      if (micOn) {
-        localMicrophoneTrack.setEnabled(false)
-      } else {
-        localMicrophoneTrack.setEnabled(true)
-      }
-      setMicOn(!micOn)
-    }
-  }, [localMicrophoneTrack, micOn])
-
-  // Handle camera toggle
-  const toggleCamera = useCallback(() => {
-    if (localCameraTrack) {
-      if (cameraOn) {
-        localCameraTrack.setEnabled(false)
-      } else {
-        localCameraTrack.setEnabled(true)
-      }
-      setCameraOn(!cameraOn)
-    }
-  }, [localCameraTrack, cameraOn])
-
-  // Publish tracks
-  usePublish([localMicrophoneTrack, localCameraTrack])
-  const remoteUsers = useRemoteUsers()
-
-  if (!callStarted) {
-    return (
-      <div className="fixed bottom-4 left-4 z-50">
-        <Button onClick={handleStartCall} className="bg-black text-white hover:bg-black/90">
-          Join Video Call
-        </Button>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className={`fixed bottom-4 left-4 z-50 bg-white rounded-lg shadow-lg transition-all duration-300 ${isMinimized ? "w-64" : "w-80"
-        }`}
-    >
-      <div className="p-2 border-b flex justify-between items-center">
-        <h3 className="text-sm font-medium">Live Session</h3>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setIsMinimized(!isMinimized)}>
-            {isMinimized ? <ChevronRight className="h-4 w-4" /> : <ChevronRight className="h-4 w-4 rotate-90" />}
-          </Button>
-        </div>
-      </div>
-      <div className={`transition-all duration-300 ${isMinimized ? "h-36" : "h-48"}`}>
-        <div className="grid grid-cols-2 gap-1 p-1 h-full">
-          {/* Local user */}
-          <div className="relative aspect-video bg-gray-100 rounded">
-            <LocalUser
-              audioTrack={localMicrophoneTrack}
-              videoTrack={localCameraTrack}
-              micOn={micOn}
-              cameraOn={cameraOn}
-              style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.25rem" }}
-            />
-            <div className="absolute bottom-1 right-1 flex gap-1 z-10">
-              <Button
-                variant="ghost"
-                size="sm"
-                className={`h-6 w-6 p-0 ${micOn ? "bg-black/50 hover:bg-black/70" : "bg-red-500/50 hover:bg-red-500/70"} text-white`}
-                onClick={toggleMic}
-              >
-                {micOn ? (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    className="w-3 h-3"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                    />
-                  </svg>
-                ) : (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    className="w-3 h-3"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
-                    />
-                  </svg>
-                )}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={`h-6 w-6 p-0 ${cameraOn ? "bg-black/50 hover:bg-black/70" : "bg-red-500/50 hover:bg-red-500/70"} text-white`}
-                onClick={toggleCamera}
-              >
-                {cameraOn ? (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    className="w-3 h-3"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                    />
-                  </svg>
-                ) : (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    className="w-3 h-3"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
-                    />
-                  </svg>
-                )}
-              </Button>
-            </div>
-          </div>
-          {/* Remote users */}
-          {remoteUsers.map((user) => (
-            <div key={user.uid} className="relative aspect-video bg-gray-100 rounded overflow-hidden">
-              <RemoteUser
-                user={user}
-                style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.25rem" }}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** Wraps VideoCallComponent in the AgoraRTCProvider */
-const VideoCall = ({ appId, channel, token }: VideoCallProps) => {
-  const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" })
-  console.log("Initializing Agora client for channel:", channel)
-  return (
-    <AgoraRTCProvider client={client}>
-      <VideoCallComponent appId={appId} channel={channel} token={token} />
-    </AgoraRTCProvider>
   )
 }
 
@@ -1227,9 +1011,9 @@ export default function Page() {
 
         {/* Live Video Session (Agora) */}
         {sessionData && sessionCode && (
-          <VideoCall
+          <VideoCallDynamic
             appId="f36445b62ae64d5d9ab6a86dd9989589"
-            token="007eJxTYNil8OHOCY6dfdsfhUw5cXGt1rl1785vujzX9tnCA9E5ggE1CgxpxmYmJqZJZkaJqWYmKaYplolJZokWZikplpYWlqYWlt0529IbAhkZUh8zsDIyQCCIz8ZgYGnsEejLwAAAxEkiuA=="
+            token="007eJxTYDj751tFnWvPrBfyyu87+A9u1/J5Yxt49fW7TH+7y5IbIzgVGNKMzUxMTJPMjBJTzUxSTFMsE5PMEi3MUlIsLS0sTS0sHRi2pzcEMjLw/a5lYmSAQBCfjcHR0TXYMpyBAQD1HCAO=="
             channel={sessionCode}
           />
         )}
