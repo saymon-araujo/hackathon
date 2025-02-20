@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { login, signup } from "./actions"
 import ToastHandler from "@/components/ToastHandler"
+import Image from "next/image"
 
 export default function LoginPage() {
   return (
@@ -65,10 +66,12 @@ export default function LoginPage() {
         </div>
       </div>
       <div className="relative hidden bg-muted lg:block">
-        <img
+        <Image
           src="/placeholder.svg"
           alt="Image"
           className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
+          width={200}
+          height={100}
         />
       </div>
     </div>

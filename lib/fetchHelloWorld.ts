@@ -22,7 +22,8 @@ export async function fetchHelloWorld(name: string): Promise<HelloWorldResponse>
 
   try {
     return data;
-  } catch (error) {
-    throw new Error('Failed to parse response JSON');
+  } catch (_error) {
+    console.error("Failed to parse response JSON");
+    throw _error;
   }
 }
