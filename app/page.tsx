@@ -1,34 +1,12 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import {
-  ChevronRight,
-  ShoppingBag,
-  User,
-  LogOut,
-  Plus,
-  Minus,
-  X,
-  Copy,
-  Loader2,
-} from "lucide-react"
+import { ChevronRight, ShoppingBag, User, LogOut, Plus, Minus, X, Copy, Loader2 } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
 import { useState, useCallback, useEffect } from "react"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { signout } from "./login/actions"
 import { createClient } from "@/utils/supabase/client"
 import {
@@ -42,12 +20,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // -----------------------------------------------------------------------------
@@ -126,13 +99,7 @@ type CartItemRowProps = {
 function CartItemRow({ item, onUpdate, onRemove }: CartItemRowProps) {
   return (
     <div key={item.item_id} className="flex items-center space-x-4">
-      <Image
-        src={item.image || "/placeholder.svg"}
-        alt={item.name}
-        width={60}
-        height={60}
-        className="rounded-md"
-      />
+      <Image src={item.image || "/placeholder.svg"} alt={item.name} width={60} height={60} className="rounded-md" />
       <div className="flex-1">
         <h3 className="text-sm font-medium">{item.name}</h3>
         <p className="text-sm text-gray-500">${item.price.toFixed(2)}</p>
@@ -168,81 +135,183 @@ const VideoCallComponent = ({ appId, channel, token }: VideoCallProps) => {
   const [callStarted, setCallStarted] = useState(false)
   const [micOn, setMicOn] = useState(true)
   const [cameraOn, setCameraOn] = useState(true)
+  const [isMinimized, setIsMinimized] = useState(false)
 
-  // Log when the user clicks to start the call.
   const handleStartCall = () => {
     console.log("User clicked join video call")
     setCallStarted(true)
   }
 
-  // Join the channel only when callStarted is true.
+  // Join the channel
   const joinResult = useJoin({ appid: appId, channel, token: token ? token : null }, callStarted)
 
-  // Log join result changes.
-  useEffect(() => {
-    console.log("Join result:", joinResult)
-  }, [joinResult])
+  // Create tracks based on state
+  const { localMicrophoneTrack, microphoneError } = useLocalMicrophoneTrack(micOn && callStarted)
+  const { localCameraTrack, cameraError } = useLocalCameraTrack(cameraOn && callStarted)
 
-  // Create local tracks only if call has started.
-  const { localMicrophoneTrack } = useLocalMicrophoneTrack(callStarted ? micOn : false)
-  const { localCameraTrack } = useLocalCameraTrack(callStarted ? cameraOn : false)
+  // Handle mic toggle
+  const toggleMic = useCallback(() => {
+    if (localMicrophoneTrack) {
+      if (micOn) {
+        localMicrophoneTrack.setEnabled(false)
+      } else {
+        localMicrophoneTrack.setEnabled(true)
+      }
+      setMicOn(!micOn)
+    }
+  }, [localMicrophoneTrack, micOn])
 
-  // Log the local tracks
-  useEffect(() => {
-    console.log("Local Microphone Track:", localMicrophoneTrack)
-  }, [localMicrophoneTrack])
-  useEffect(() => {
-    console.log("Local Camera Track:", localCameraTrack)
-  }, [localCameraTrack])
+  // Handle camera toggle
+  const toggleCamera = useCallback(() => {
+    if (localCameraTrack) {
+      if (cameraOn) {
+        localCameraTrack.setEnabled(false)
+      } else {
+        localCameraTrack.setEnabled(true)
+      }
+      setCameraOn(!cameraOn)
+    }
+  }, [localCameraTrack, cameraOn])
 
-  // Publish the local audio and video tracks.
-  const publishResult = usePublish([localMicrophoneTrack, localCameraTrack])
-  useEffect(() => {
-    console.log("Publish result:", publishResult)
-  }, [publishResult])
-
+  // Publish tracks
+  usePublish([localMicrophoneTrack, localCameraTrack])
   const remoteUsers = useRemoteUsers()
-  useEffect(() => {
-    console.log("Remote Users:", remoteUsers)
-  }, [remoteUsers])
 
   if (!callStarted) {
     return (
-      <div className="flex flex-col items-center">
-        <Button onClick={handleStartCall}>Join Video Call</Button>
+      <div className="fixed bottom-4 left-4 z-50">
+        <Button onClick={handleStartCall} className="bg-black text-white hover:bg-black/90">
+          Join Video Call
+        </Button>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col items-center space-y-4">
-      {/* Controls */}
-      <div className="flex space-x-4">
-        <Button onClick={() => { setMicOn((prev) => !prev); console.log("Mic toggled:", !micOn) }}>
-          {micOn ? "Mute Mic" : "Unmute Mic"}
-        </Button>
-        <Button onClick={() => { setCameraOn((prev) => !prev); console.log("Camera toggled:", !cameraOn) }}>
-          {cameraOn ? "Turn Off Camera" : "Turn On Camera"}
-        </Button>
-      </div>
-      {/* Video Streams */}
-      <div className="flex flex-wrap justify-center gap-4">
-        {/* Local video */}
-        <div style={{ width: "320px", height: "240px" }} className="border">
-          <LocalUser
-            audioTrack={localMicrophoneTrack}
-            videoTrack={localCameraTrack}
-            micOn={micOn}
-            cameraOn={cameraOn}
-            style={{ width: "100%", height: "100%" }}
-          />
+    <div
+      className={`fixed bottom-4 left-4 z-50 bg-white rounded-lg shadow-lg transition-all duration-300 ${isMinimized ? "w-64" : "w-80"
+        }`}
+    >
+      <div className="p-2 border-b flex justify-between items-center">
+        <h3 className="text-sm font-medium">Live Session</h3>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setIsMinimized(!isMinimized)}>
+            {isMinimized ? <ChevronRight className="h-4 w-4" /> : <ChevronRight className="h-4 w-4 rotate-90" />}
+          </Button>
         </div>
-        {/* Remote users */}
-        {remoteUsers.map((user) => (
-          <div key={user.uid} style={{ width: "320px", height: "240px" }} className="border">
-            <RemoteUser user={user} style={{ width: "100%", height: "100%" }} />
+      </div>
+      <div className={`transition-all duration-300 ${isMinimized ? "h-36" : "h-48"}`}>
+        <div className="grid grid-cols-2 gap-1 p-1 h-full">
+          {/* Local user */}
+          <div className="relative aspect-video bg-gray-100 rounded">
+            <LocalUser
+              audioTrack={localMicrophoneTrack}
+              videoTrack={localCameraTrack}
+              micOn={micOn}
+              cameraOn={cameraOn}
+              style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.25rem" }}
+            />
+            <div className="absolute bottom-1 right-1 flex gap-1 z-10">
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`h-6 w-6 p-0 ${micOn ? "bg-black/50 hover:bg-black/70" : "bg-red-500/50 hover:bg-red-500/70"} text-white`}
+                onClick={toggleMic}
+              >
+                {micOn ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    className="w-3 h-3"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    className="w-3 h-3"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
+                    />
+                  </svg>
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`h-6 w-6 p-0 ${cameraOn ? "bg-black/50 hover:bg-black/70" : "bg-red-500/50 hover:bg-red-500/70"} text-white`}
+                onClick={toggleCamera}
+              >
+                {cameraOn ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    className="w-3 h-3"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    className="w-3 h-3"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
+                    />
+                  </svg>
+                )}
+              </Button>
+            </div>
           </div>
-        ))}
+          {/* Remote users */}
+          {remoteUsers.map((user) => (
+            <div key={user.uid} className="relative aspect-video bg-gray-100 rounded overflow-hidden">
+              <RemoteUser
+                user={user}
+                style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.25rem" }}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -291,11 +360,7 @@ export default function Page() {
       setIsGeneratingCode(false)
       return
     }
-    const { data: existingSession } = await supabase
-      .from("sessions")
-      .select("*")
-      .eq("created_by", user.id)
-      .single()
+    const { data: existingSession } = await supabase.from("sessions").select("*").eq("created_by", user.id).single()
 
     if (existingSession) {
       console.log("Existing session found:", existingSession)
@@ -339,11 +404,7 @@ export default function Page() {
     const checkActiveSession = async () => {
       const user = await getUser(supabase)
       if (!user) return
-      const { data: activeSession } = await supabase
-        .from("sessions")
-        .select("*")
-        .eq("created_by", user.id)
-        .single()
+      const { data: activeSession } = await supabase.from("sessions").select("*").eq("created_by", user.id).single()
       if (activeSession) {
         console.log("Active session found:", activeSession)
         setSessionCode(activeSession.code)
@@ -512,18 +573,12 @@ export default function Page() {
         toast.error("Error deleting session cart items")
         return
       }
-      const { error: usersError } = await supabase
-        .from("session_users")
-        .delete()
-        .match({ session_id: sessionData.id })
+      const { error: usersError } = await supabase.from("session_users").delete().match({ session_id: sessionData.id })
       if (usersError) {
         toast.error("Error disconnecting session")
         return
       }
-      const { error: sessionDeleteError } = await supabase
-        .from("sessions")
-        .delete()
-        .match({ id: sessionData.id })
+      const { error: sessionDeleteError } = await supabase.from("sessions").delete().match({ id: sessionData.id })
       if (sessionDeleteError) {
         toast.error("Error deleting session")
         return
@@ -552,10 +607,7 @@ export default function Page() {
   useEffect(() => {
     if (!sessionData) return
     const fetchSessionCartItems = async () => {
-      const { data, error } = await supabase
-        .from("session_cart_items")
-        .select("*")
-        .eq("session_id", sessionData.id)
+      const { data, error } = await supabase.from("session_cart_items").select("*").eq("session_id", sessionData.id)
       if (!error && data) {
         console.log("Fetched session cart items:", data)
         setSessionCartItems(data)
@@ -591,10 +643,7 @@ export default function Page() {
     const fetchPersonalCartItems = async () => {
       const user = await getUser(supabase)
       if (!user) return
-      const { data, error } = await supabase
-        .from("personal_cart_items")
-        .select("*")
-        .eq("user_id", user.id)
+      const { data, error } = await supabase.from("personal_cart_items").select("*").eq("user_id", user.id)
       if (!error && data) {
         console.log("Fetched personal cart items:", data)
         setPersonalCartItems(data)
@@ -700,11 +749,7 @@ export default function Page() {
   const removeFromPersonalCart = async (itemId: string) => {
     const user = await getUser(supabase)
     if (!user) return
-    const { error } = await supabase
-      .from("personal_cart_items")
-      .delete()
-      .eq("user_id", user.id)
-      .eq("item_id", itemId)
+    const { error } = await supabase.from("personal_cart_items").delete().eq("user_id", user.id).eq("item_id", itemId)
     if (error) {
       toast.error("Error removing item from cart")
     }
@@ -791,9 +836,7 @@ export default function Page() {
                         <Tooltip key={participant.id}>
                           <TooltipTrigger asChild>
                             <Avatar className="w-8 h-8 border-2 border-white">
-                              <AvatarFallback>
-                                {participant.profiles?.email?.[0].toUpperCase() || "?"}
-                              </AvatarFallback>
+                              <AvatarFallback>{participant.profiles?.email?.[0].toUpperCase() || "?"}</AvatarFallback>
                             </Avatar>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -836,9 +879,7 @@ export default function Page() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Join Live Session</DialogTitle>
-                      <DialogDescription>
-                        Enter the 6-digit code to join an existing session.
-                      </DialogDescription>
+                      <DialogDescription>Enter the 6-digit code to join an existing session.</DialogDescription>
                     </DialogHeader>
                     <div className="flex items-center space-x-2">
                       <Input
@@ -1177,9 +1218,7 @@ export default function Page() {
                     placeholder="Enter your email"
                     className="flex-1 rounded-full px-6 py-3 bg-white/10 border border-white/20 text-white placeholder:text-gray-400"
                   />
-                  <Button className="bg-white text-black hover:bg-white/90 rounded-full px-8">
-                    Subscribe
-                  </Button>
+                  <Button className="bg-white text-black hover:bg-white/90 rounded-full px-8">Subscribe</Button>
                 </form>
               </div>
             </div>
@@ -1188,20 +1227,11 @@ export default function Page() {
 
         {/* Live Video Session (Agora) */}
         {sessionData && sessionCode && (
-          <section className="py-12 bg-gray-100">
-            <div className="container px-4">
-              <h2 className="text-2xl font-bold text-center mb-4">Live Video Session</h2>
-              {/*
-                Replace the placeholders below with your actual Agora App ID and temporary token.
-                The channel name is set to the session code.
-              */}
-              <VideoCall
-                appId="f36445b62ae64d5d9ab6a86dd9989589"
-                token="007eJxTYNil8OHOCY6dfdsfhUw5cXGt1rl1785vujzX9tnCA9E5ggE1CgxpxmYmJqZJZkaJqWYmKaYplolJZokWZikplpYWlqYWlt0529IbAhkZUh8zsDIyQCCIz8ZgYGnsEejLwAAAxEkiuA=="
-                channel={sessionCode}
-              />
-            </div>
-          </section>
+          <VideoCall
+            appId="f36445b62ae64d5d9ab6a86dd9989589"
+            token="007eJxTYNil8OHOCY6dfdsfhUw5cXGt1rl1785vujzX9tnCA9E5ggE1CgxpxmYmJqZJZkaJqWYmKaYplolJZokWZikplpYWlqYWlt0529IbAhkZUh8zsDIyQCCIz8ZgYGnsEejLwAAAxEkiuA=="
+            channel={sessionCode}
+          />
         )}
       </main>
 
