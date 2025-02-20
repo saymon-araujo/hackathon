@@ -146,8 +146,8 @@ const VideoCallComponent = ({ appId, channel, token }: VideoCallProps) => {
   const joinResult = useJoin({ appid: appId, channel, token: token ? token : null }, callStarted)
 
   // Create tracks based on state
-  const { localMicrophoneTrack, microphoneError } = useLocalMicrophoneTrack(micOn && callStarted)
-  const { localCameraTrack, cameraError } = useLocalCameraTrack(cameraOn && callStarted)
+  const { localMicrophoneTrack } = useLocalMicrophoneTrack(micOn && callStarted)
+  const { localCameraTrack } = useLocalCameraTrack(cameraOn && callStarted)
 
   // Handle mic toggle
   const toggleMic = useCallback(() => {
